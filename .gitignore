@@ -1,0 +1,12 @@
+.env
+.agents
+.codex
+config/local.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+dist/
+build/
+*.egg-info/
+

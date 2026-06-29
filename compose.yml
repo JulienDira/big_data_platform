@@ -1,0 +1,4 @@
+name: big-data-platform
+
+include:
+  - infra/compose/compose.yml

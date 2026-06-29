@@ -1,0 +1,94 @@
+services:
+  hive-schema:
+    build:
+      context: ../..
+      dockerfile: infra/images/hive/Dockerfile
+      args:
+        HIVE_VERSION: ${HIVE_VERSION}
+    image: big-data-platform/hive:${HIVE_VERSION}
+    user: hive
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - ../config/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    entrypoint: []
+    command:
+      - bash
+      - -ec
+      - |
+        if schematool -dbType postgres -info; then
+          schematool -dbType postgres -upgradeSchema -verbose
+        else
+          schematool -dbType postgres -initSchema -verbose
+        fi
+    networks:
+      - platform
+    restart: "no"
+
+  hive-metastore:
+    image: big-data-platform/hive:${HIVE_VERSION}
+    hostname: hive-metastore
+    user: hive
+    depends_on:
+      hive-schema:
+        condition: service_completed_successfully
+      hdfs-init:
+        condition: service_completed_successfully
+    environment:
+      SERVICE_NAME: metastore
+      IS_RESUME: "true"
+      DB_DRIVER: postgres
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - ../config/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    ports:
+      - "9083:9083"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9083'"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    networks:
+      - platform
+
+  hiveserver2:
+    image: big-data-platform/hive:${HIVE_VERSION}
+    hostname: hiveserver2
+    user: hive
+    depends_on:
+      hive-metastore:
+        condition: service_healthy
+    environment:
+      SERVICE_NAME: hiveserver2
+      IS_RESUME: "true"
+      DB_DRIVER: postgres
+      HADOOP_CONF_DIR: /opt/hadoop/etc/hadoop
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - ../config/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    networks:
+      - platform

@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "name": "MarketCandle",
+  "namespace": "com.example.trading.v1",
+  "doc": "Canonical normalized market candle emitted by an ingestion source.",
+  "fields": [
+    {"name": "event_id", "type": "string"},
+    {"name": "source", "type": "string"},
+    {"name": "symbol", "type": "string"},
+    {"name": "interval", "type": "string"},
+    {"name": "open_time", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "close_time", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+    {"name": "open", "type": "double"},
+    {"name": "high", "type": "double"},
+    {"name": "low", "type": "double"},
+    {"name": "close", "type": "double"},
+    {"name": "volume", "type": "double"},
+    {"name": "quote_asset_volume", "type": "double"},
+    {"name": "number_of_trades", "type": "long"},
+    {"name": "taker_buy_base_asset_volume", "type": "double"},
+    {"name": "taker_buy_quote_asset_volume", "type": "double"},
+    {"name": "is_closed", "type": "boolean"},
+    {"name": "ingested_at", "type": {"type": "long", "logicalType": "timestamp-millis"}}
+  ]
+}
+

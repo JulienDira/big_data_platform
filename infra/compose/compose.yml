@@ -1,0 +1,20 @@
+include:
+  - storage.yml
+  - lake.yml
+  - warehouse.yml
+  - streaming.yml
+  - orchestration.yml
+  - ui.yml
+
+networks:
+  platform:
+    name: big-data-platform
+
+volumes:
+  kafka-data:
+  namenode-data:
+  datanode-data:
+  yarn-local:
+  yarn-logs:
+  postgres-data:
+  airflow-logs:

@@ -1,0 +1,135 @@
+x-airflow-runtime: &airflow-runtime
+  profiles: ["orchestration"]
+  image: big-data-platform/airflow-spark:${AIRFLOW_VERSION}
+  env_file:
+    - path: ../../config/defaults.env
+    - path: ../../config/local.env
+      required: false
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    AIRFLOW__WEBSERVER__SECRET_KEY: local-airflow-secret
+    SPARK_VERSION: ${SPARK_VERSION}
+    HIVE_VERSION: ${HIVE_VERSION}
+  volumes:
+    - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+    - ../config/spark:/opt/spark/conf:ro
+    - ../../orchestration/dags:/opt/airflow/dags:ro
+    - ../..:/workspace:ro
+    - airflow-logs:/opt/airflow/logs
+  networks:
+    - platform
+
+services:
+  airflow-image:
+    profiles: ["orchestration"]
+    build:
+      context: ../..
+      dockerfile: infra/images/airflow-spark/Dockerfile
+      args:
+        AIRFLOW_VERSION: ${AIRFLOW_VERSION}
+        SPARK_VERSION: ${SPARK_VERSION}
+    image: big-data-platform/airflow-spark:${AIRFLOW_VERSION}
+    command: ["bash", "-ec", "true"]
+    networks:
+      - platform
+    restart: "no"
+
+  airflow-db-init:
+    profiles: ["orchestration"]
+    image: postgres:${POSTGRES_VERSION}
+    env_file:
+      - path: ../../config/defaults.env
+      - path: ../../config/local.env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - bash
+      - -ec
+      - |
+        export PGPASSWORD="$${POSTGRES_PASSWORD}"
+        if [ "$$(psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -tAc "SELECT 1 FROM pg_roles WHERE rolname='airflow'")" != "1" ]; then
+          psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -c "CREATE USER airflow WITH PASSWORD 'airflow'"
+        fi
+        if [ "$$(psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -tAc "SELECT 1 FROM pg_database WHERE datname='airflow'")" != "1" ]; then
+          psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -c "CREATE DATABASE airflow OWNER airflow"
+        fi
+    networks:
+      - platform
+    restart: "no"
+
+  airflow-init:
+    <<: *airflow-runtime
+    depends_on:
+      airflow-image:
+        condition: service_completed_successfully
+      airflow-db-init:
+        condition: service_completed_successfully
+    entrypoint: []
+    command:
+      - bash
+      - -ec
+      - |
+        airflow db migrate
+        airflow users create \
+          --username "$${AIRFLOW_ADMIN_USER}" \
+          --password "$${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname "$${AIRFLOW_ADMIN_FIRSTNAME}" \
+          --lastname "$${AIRFLOW_ADMIN_LASTNAME}" \
+          --role Admin \
+          --email "$${AIRFLOW_ADMIN_EMAIL}" || true
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-runtime
+    command: ["webserver"]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      nodemanager:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 1.5G
+
+  airflow-scheduler:
+    <<: *airflow-runtime
+    command: ["scheduler"]
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      kafka-init:
+        condition: service_completed_successfully
+      nodemanager:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 1.5G

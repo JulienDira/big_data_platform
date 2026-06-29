@@ -1,0 +1,185 @@
+x-platform-service: &platform-service
+  build:
+    context: ../..
+    dockerfile: infra/images/hadoop-runtime/Dockerfile
+    args:
+      HADOOP_VERSION: ${HADOOP_VERSION}
+      MINIFORGE_VERSION: ${MINIFORGE_VERSION}
+      PYTHON_VERSION: ${PYTHON_VERSION}
+  image: big-data-platform/hadoop-runtime:${HADOOP_VERSION}
+  env_file:
+    - path: ../../config/defaults.env
+    - path: ../../config/local.env
+      required: false
+  environment:
+    SPARK_VERSION: ${SPARK_VERSION}
+    HADOOP_VERSION: ${HADOOP_VERSION}
+  volumes:
+    - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+    - ../..:/workspace:ro
+  networks:
+    - platform
+
+x-spark-service: &spark-service
+  build:
+    context: ../..
+    dockerfile: infra/images/spark-client/Dockerfile
+    args:
+      SPARK_VERSION: ${SPARK_VERSION}
+  image: big-data-platform/spark-client:${SPARK_VERSION}
+  env_file:
+    - path: ../../config/defaults.env
+    - path: ../../config/local.env
+      required: false
+  environment:
+    SPARK_VERSION: ${SPARK_VERSION}
+    HIVE_VERSION: ${HIVE_VERSION}
+  volumes:
+    - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+    - ../config/spark:/opt/spark/conf:ro
+    - ../..:/workspace:ro
+  networks:
+    - platform
+
+services:
+  namenode:
+    <<: *platform-service
+    hostname: namenode
+    command: ["bash", "/workspace/infra/scripts/start-namenode.sh"]
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - ../scripts:/workspace/infra/scripts:ro
+      - namenode-data:/data/hdfs/namenode
+    ports:
+      - "9000:9000"
+      - "9870:9870"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://namenode:9870/jmx', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  datanode:
+    <<: *platform-service
+    command: ["hdfs", "datanode"]
+    depends_on:
+      namenode:
+        condition: service_healthy
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - datanode-data:/data/hdfs/datanode
+    ports:
+      - "9864:9864"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://datanode:9864/jmx', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  hdfs-init:
+    <<: *platform-service
+    command: ["bash", "/workspace/infra/scripts/init-hdfs.sh"]
+    depends_on:
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - ../scripts:/workspace/infra/scripts:ro
+    restart: "no"
+
+  resourcemanager:
+    <<: *platform-service
+    hostname: resourcemanager
+    command: ["yarn", "resourcemanager"]
+    depends_on:
+      namenode:
+        condition: service_healthy
+    ports:
+      - "8032:8032"
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://resourcemanager:8088/ws/v1/cluster/info', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  nodemanager:
+    <<: *platform-service
+    command: ["yarn", "nodemanager"]
+    depends_on:
+      resourcemanager:
+        condition: service_healthy
+      hdfs-init:
+        condition: service_completed_successfully
+    volumes:
+      - ../config/hadoop:/opt/hadoop/etc/hadoop:ro
+      - ../config/spark:/opt/spark/conf:ro
+      - yarn-local:/data/yarn/local
+      - yarn-logs:/data/yarn/logs
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://nodemanager:8042/ws/v1/node/info', timeout=3).read()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 10G
+        reservations:
+          cpus: '2'
+          memory: 6G
+
+  spark-history:
+    <<: *spark-service
+    hostname: spark-history
+    command: ["spark-class", "org.apache.spark.deploy.history.HistoryServer"]
+    depends_on:
+      hdfs-init:
+        condition: service_completed_successfully
+    ports:
+      - "18080:18080"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  spark-client:
+    <<: *spark-service
+    profiles: ["tools"]
+    depends_on:
+      nodemanager:
+        condition: service_healthy
+      hive-metastore:
+        condition: service_healthy
+    command: ["sleep", "infinity"]

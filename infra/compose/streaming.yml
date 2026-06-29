@@ -1,0 +1,180 @@
+x-binance-producer: &binance-producer
+  profiles: ["ingestion"]
+  build:
+    context: ../..
+    dockerfile: apps/binance-producer/Dockerfile
+    args:
+      PYTHON_VERSION: ${PYTHON_VERSION}
+  image: big-data-platform/binance-producer:1.0.0
+  env_file:
+    - path: ../../config/defaults.env
+    - path: ../../config/local.env
+      required: false
+  depends_on:
+    kafka-init:
+      condition: service_completed_successfully
+    schema-registry:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - platform
+
+services:
+  kafka:
+    image: confluentinc/cp-kafka:${KAFKA_PLATFORM_VERSION}
+    hostname: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 24
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - "9094:9094"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1.5G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    networks:
+      - platform
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:${KAFKA_PLATFORM_VERSION}
+    hostname: schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: backward
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/subjects >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    networks:
+      - platform
+
+  kafka-init:
+    image: confluentinc/cp-kafka:${KAFKA_PLATFORM_VERSION}
+    env_file:
+      - path: ../../config/defaults.env
+      - path: ../../config/local.env
+        required: false
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - bash
+      - -ec
+      - |
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic "$${KAFKA_TOPIC}" --partitions 3 --replication-factor 1
+        kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists \
+          --topic "$${KAFKA_ERROR_TOPIC}" --partitions 1 --replication-factor 1
+    networks:
+      - platform
+
+  binance-producer-btcusdc-1s:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: BTCUSDC
+      MARKET_INTERVALS: 1s
+
+  binance-producer-btcusdc-1m:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: BTCUSDC
+      MARKET_INTERVALS: 1m
+
+  binance-producer-btcusdc-15m:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: BTCUSDC
+      MARKET_INTERVALS: 15m
+
+  binance-producer-btcusdc-1h:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: BTCUSDC
+      MARKET_INTERVALS: 1h
+
+  binance-producer-ethusdc-1s:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: ETHUSDC
+      MARKET_INTERVALS: 1s
+
+  binance-producer-ethusdc-1m:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: ETHUSDC
+      MARKET_INTERVALS: 1m
+
+  binance-producer-ethusdc-15m:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: ETHUSDC
+      MARKET_INTERVALS: 15m
+
+  binance-producer-ethusdc-1h:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: ETHUSDC
+      MARKET_INTERVALS: 1h
+
+  binance-producer-solusdc-1s:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: SOLUSDC
+      MARKET_INTERVALS: 1s
+
+  binance-producer-solusdc-1m:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: SOLUSDC
+      MARKET_INTERVALS: 1m
+
+  binance-producer-solusdc-15m:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: SOLUSDC
+      MARKET_INTERVALS: 15m
+
+  binance-producer-solusdc-1h:
+    <<: *binance-producer
+    environment:
+      MARKET_SYMBOLS: SOLUSDC
+      MARKET_INTERVALS: 1h

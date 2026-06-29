@@ -1,0 +1,54 @@
+services:
+  kafka-ui:
+    profiles: ["ui"]
+    image: provectuslabs/kafka-ui:v0.7.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    ports:
+      - "8085:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    networks:
+      - platform
+
+  hue:
+    profiles: ["ui"]
+    image: gethue/hue:4.11.0
+    depends_on:
+      namenode:
+        condition: service_healthy
+      resourcemanager:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      hiveserver2:
+        condition: service_started
+    volumes:
+      - ../config/hue/hue.ini:/usr/share/hue/desktop/conf/z-hue.ini:ro
+      - ../config/hadoop:/etc/hadoop/conf:ro
+      - ../config/hive/hive-site.xml:/etc/hive/conf/hive-site.xml:ro
+    ports:
+      - "8888:8888"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    networks:
+      - platform
