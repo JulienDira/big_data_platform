@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if PYSPARK_AVAILABLE:
     sys.path.insert(0, str(ROOT / "jobs"))
 
-    from pyspark.sql.types import StringType, StructField, StructType
+    from pyspark.sql.types import BinaryType, StringType, StructField, StructType
 
     from spark_test_utils import create_local_spark
-    from utils.bronze import build_bronze_rejected
+    from utils.bronze import build_bronze_rejected, decode_avro_payload
     from utils.dedup import latest_by_key
     from utils.market_schema import GOLD_SOURCE_COLUMNS, SILVER_COLUMNS
     from utils.quality import apply_silver_quality_rules
@@ -136,6 +136,45 @@ class UtilsTransformsTest(unittest.TestCase):
 
         result = build_bronze_rejected(frame)
         row = result.collect()[0]
+
+        self.assertEqual("market-candles", row.stream_name)
+        self.assertEqual("BTCUSDC|1m", row.partition_key)
+        self.assertEqual("avro_decode_failed", row.bronze_error_reason)
+
+    def test_invalid_direct_avro_payload_goes_to_bronze_rejected(self):
+        raw_schema = StructType(
+            [
+                StructField("source", StringType(), True),
+                StructField("stream_name", StringType(), True),
+                StructField("partition_key", StringType(), True),
+                StructField("sequence_number", StringType(), True),
+                StructField("value", BinaryType(), True),
+                StructField("ingested_at", StringType(), True),
+            ]
+        )
+        raw = self.spark.createDataFrame(
+            [
+                (
+                    "kinesis",
+                    "market-candles",
+                    "BTCUSDC|1m",
+                    "1",
+                    bytes(b"not-avro"),
+                    "2026-01-01 00:01:00",
+                )
+            ],
+            raw_schema,
+        )
+        contract = (ROOT / "contracts/market-candle/v1.avsc").read_text(encoding="utf-8")
+
+        try:
+            decoded = decode_avro_payload(raw, contract, value_column="value")
+        except TypeError as exc:
+            if "JavaPackage" in str(exc):
+                self.skipTest("Spark Avro package is not available in local test classpath")
+            raise
+        rejected = build_bronze_rejected(decoded)
+        row = rejected.collect()[0]
 
         self.assertEqual("market-candles", row.stream_name)
         self.assertEqual("BTCUSDC|1m", row.partition_key)

@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -11,6 +12,15 @@ SPEC = importlib.util.spec_from_file_location("producer_aws", APP_PATH / "aws.py
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 from avro_codec import decode_record, load_schema
+
+
+def normalize_fastavro_logical_values(record: dict) -> dict:
+    normalized = dict(record)
+    for field in ("open_time", "close_time", "ingested_at"):
+        value = normalized[field]
+        if isinstance(value, datetime):
+            normalized[field] = int(value.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    return normalized
 
 
 def canonical_candle() -> dict:
@@ -46,13 +56,19 @@ class ProducerAwsTest(unittest.TestCase):
         candle = canonical_candle()
         contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
         record = MODULE.build_kinesis_record(candle, contract)
-        payload = decode_record(record["Data"], contract)
+        payload = normalize_fastavro_logical_values(decode_record(record["Data"], contract))
         contract_fields = {field["name"] for field in contract["fields"]}
 
         self.assertEqual(contract_fields, set(payload))
         self.assertEqual(candle, payload)
         with self.assertRaises(UnicodeDecodeError):
             record["Data"].decode("utf-8")
+
+    def test_invalid_avro_payload_raises_clear_error(self):
+        contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
+
+        with self.assertRaisesRegex(ValueError, "Invalid Avro payload"):
+            decode_record(b"not-avro", contract)
 
     def test_publish_records_batches_kinesis_calls(self):
         class FakeKinesisClient:
