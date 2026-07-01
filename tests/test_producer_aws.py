@@ -1,5 +1,4 @@
 import importlib.util
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +10,7 @@ sys.path.insert(0, str(APP_PATH))
 SPEC = importlib.util.spec_from_file_location("producer_aws", APP_PATH / "aws.py")
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+from avro_codec import decode_record, load_schema
 
 
 def canonical_candle() -> dict:
@@ -37,21 +37,22 @@ def canonical_candle() -> dict:
 
 class ProducerAwsTest(unittest.TestCase):
     def test_kinesis_record_uses_symbol_interval_partition_key(self):
-        record = MODULE.build_kinesis_record(canonical_candle())
+        contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
+        record = MODULE.build_kinesis_record(canonical_candle(), contract)
 
         self.assertEqual("BTCUSDC|1m", record["PartitionKey"])
 
     def test_kinesis_payload_matches_canonical_avro_fields(self):
         candle = canonical_candle()
-        record = MODULE.build_kinesis_record(candle)
-        payload = json.loads(record["Data"].decode("utf-8"))
-        contract = json.loads(
-            (ROOT / "contracts/market-candle/v1.avsc").read_text(encoding="utf-8")
-        )
+        contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
+        record = MODULE.build_kinesis_record(candle, contract)
+        payload = decode_record(record["Data"], contract)
         contract_fields = {field["name"] for field in contract["fields"]}
 
         self.assertEqual(contract_fields, set(payload))
         self.assertEqual(candle, payload)
+        with self.assertRaises(UnicodeDecodeError):
+            record["Data"].decode("utf-8")
 
     def test_publish_records_batches_kinesis_calls(self):
         class FakeKinesisClient:
@@ -66,7 +67,10 @@ class ProducerAwsTest(unittest.TestCase):
                 }
 
         client = FakeKinesisClient()
-        records = [MODULE.build_kinesis_record(canonical_candle()) for _ in range(3)]
+        contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
+        records = [
+            MODULE.build_kinesis_record(canonical_candle(), contract) for _ in range(3)
+        ]
 
         MODULE.publish_records(client, "market-candles", records, batch_size=2)
 

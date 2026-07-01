@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
+from pathlib import Path
 import time
 
+from avro_codec import encode_record, load_schema
 from common import (
     build_partition_key,
     csv_env,
@@ -21,23 +22,23 @@ logging.basicConfig(
 LOGGER = logging.getLogger("binance-producer-aws")
 
 
+def load_contract() -> dict:
+    return load_schema(Path(required_env("CONTRACT_PATH")))
+
+
 def build_kinesis_client(region_name: str):
     import boto3
 
     return boto3.client("kinesis", region_name=region_name)
 
 
-def encode_candle(candle: dict) -> bytes:
-    return json.dumps(
-        candle,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
+def encode_candle(candle: dict, schema: dict | None = None) -> bytes:
+    return encode_record(candle, schema or load_contract())
 
 
-def build_kinesis_record(candle: dict) -> dict:
+def build_kinesis_record(candle: dict, schema: dict | None = None) -> dict:
     return {
-        "Data": encode_candle(candle),
+        "Data": encode_candle(candle, schema),
         "PartitionKey": build_partition_key(candle),
     }
 
@@ -83,6 +84,7 @@ def main() -> None:
     client = build_kinesis_client(region_name)
     session = requests.Session()
     base_url = required_env("BINANCE_BASE_URL").rstrip("/")
+    schema = load_contract()
     last_event_ids: set[str] = set()
 
     while True:
@@ -94,7 +96,7 @@ def main() -> None:
                     candle = fetch_latest(session, base_url, symbol, interval.lower())
                     if candle["event_id"] in last_event_ids:
                         continue
-                    records.append(build_kinesis_record(candle))
+                    records.append(build_kinesis_record(candle, schema))
                     event_ids.append(candle["event_id"])
                 except Exception:
                     LOGGER.exception("Failed to fetch %s/%s", symbol, interval)

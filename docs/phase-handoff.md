@@ -9,11 +9,6 @@ The project is an on-premise Spark/YARN/HDFS/Hive/Airflow/PostgreSQL platform
 that is being made portable to AWS progressively. The on-premise platform must
 remain functional while AWS entry points are added phase by phase.
 
-Permanent rules live in `AGENTS.md`. The target architecture and migration
-cadrage live in `cadrage.md`. AWS service/IAM decisions live in
-`docs/aws-service-iam-decisions.md`. AWS phase prompts live in
-`docs/aws-phase-prompts.md`.
-
 Current stable on-premise architecture:
 
 ```text
@@ -21,13 +16,12 @@ Binance REST -> Kafka/Schema Registry -> Raw HDFS -> Bronze HDFS
 -> Silver Hive -> Gold Hive -> Serving PostgreSQL
 ```
 
-Current prepared AWS core architecture:
+Current prepared AWS architecture:
 
 ```text
 Binance REST -> ECS/Fargate producer -> Kinesis Data Stream
-Kinesis -> S3 Raw/Bronze/Silver is not designed yet
-Silver S3 -> Glue Spark -> Gold S3 -> trading_gold S3
--> Glue Data Catalog -> Athena
+-> Glue Streaming Raw S3 -> Glue batch Bronze S3 -> Glue batch Silver S3
+-> Glue Spark Gold S3 -> trading_gold S3 -> Glue Data Catalog -> Athena
 ```
 
 PostgreSQL remains an on-premise Serving target only. RDS/PostgreSQL is not part
@@ -52,24 +46,24 @@ the AWS phases:
   - `market_daily_summary`: 6 rows.
 - Spark History event logs/API were checked for the three applications.
 
-AWS batch preparation before this phase:
+AWS core preparation before this phase:
 
-- `jobs/gold-indicators/aws.py` exists and reads Silver Parquet from S3, writes
-  analytical Gold Parquet, then materializes `trading_gold.*` Parquet datasets.
-- `infra/aws/batch` exists for S3, Glue Data Catalog, Glue Spark and Athena.
-- AWS runtime proof for S3/Glue/Athena is still missing.
+- `apps/binance-producer/aws.py` existed as the Kinesis producer entry point.
+- `infra/aws/core` existed for Kinesis, ECR, ECS/Fargate, IAM and producer logs.
+- `jobs/gold-indicators/aws.py` existed and read Silver Parquet from S3, wrote
+  analytical Gold Parquet, then materialized `trading_gold.*` Parquet datasets.
+- `infra/aws/batch` existed for S3, Glue Data Catalog, Glue Spark and Athena.
 
 ## Last Completed Phase
 
-Phase: AWS core implementation.
+Phase: AWS Avro lake ingestion implementation.
 
-Goal: implement the core AWS portability path defined in
-`docs/aws-core-portability-cadrage.md`: producer to Kinesis, ECR/ECS/Fargate
-packaging, Glue artifact packaging hardening, static/local validation and
-handoff documentation.
+Goal: implement the missing AWS path from Kinesis to S3 Raw/Bronze/Silver,
+harmonize AWS Kinesis payloads on Avro binary instead of JSON, keep local
+Kafka/Confluent Avro working, and update the documentation/phase sequence.
 
-Status: implemented and statically validated. No AWS runtime resource was
-deployed or checked in a real AWS account.
+Status: implemented and prepared for static validation. No AWS runtime resource
+was deployed or checked in a real AWS account.
 
 ## Start Diagnostic
 
@@ -81,255 +75,174 @@ Required docs read before changes:
 - `docs/phase-template.md`;
 - `docs/aws-service-iam-decisions.md`;
 - `docs/aws-phase-prompts.md`;
-- `docs/aws-core-portability-cadrage.md`.
+- `docs/aws-core-portability-cadrage.md`;
+- `docs/aws-lake-ingestion-cadrage.md`.
 
 Initial checks:
 
-- `git status --short` showed an existing dirty working tree with modified and
-  untracked files from previous phases; nothing was reverted.
-- Direct repo inspection covered:
-  - `apps/binance-producer/main.py`;
-  - `apps/binance-producer/model.py`;
-  - `apps/binance-producer/Dockerfile`;
-  - `apps/binance-producer/requirements.txt`;
-  - `contracts/market-candle/v1.avsc`;
-  - `tests/test_producer_model.py`;
-  - `tests/test_contract.py`;
-  - `jobs/gold-indicators/aws.py`;
-  - `jobs/utils`;
-  - `jobs/serving-datamart/registry.py`;
-  - `jobs/serving-datamart/sql`;
-  - `infra/aws/batch`;
-  - current repo scripts and test entry points.
+- `git status --short` showed existing documentation changes from the previous
+  cadrage phase:
+  - `docs/aws-service-iam-decisions.md`;
+  - `docs/phase-handoff.md`;
+  - untracked `docs/aws-lake-ingestion-cadrage.md`.
+- Nothing was reverted.
+- `rg` and direct reads covered the producer, Raw/Bronze/Silver jobs,
+  `jobs/utils`, Terraform AWS modules and related tests.
 
 ## Changes Completed
 
-Producer AWS core:
+Producer AWS:
 
-- Added `apps/binance-producer/common.py` with shared producer runtime helpers:
-  required env loading, CSV env parsing, positive integer env parsing, Binance
-  latest candle fetch and `symbol|interval` partition key construction.
-- Updated `apps/binance-producer/main.py` to reuse the shared helpers while
-  keeping the Kafka/Schema Registry on-premise path in `main.py`.
-- Added `apps/binance-producer/aws.py` as the AWS Kinesis entry point:
-  - reads `AWS_REGION`, `KINESIS_STREAM_NAME`,
-    `KINESIS_PUBLISH_BATCH_SIZE`, `MARKET_SYMBOLS`,
-    `MARKET_INTERVALS`, `BINANCE_BASE_URL`, `PRODUCER_POLL_SECONDS`;
-  - reuses the shared Binance fetch and `normalize_kline` path;
-  - publishes canonical UTF-8 JSON records to Kinesis;
-  - uses partition key `symbol|interval`;
-  - batches records with Kinesis `put_records`.
-- Added `apps/binance-producer/requirements-aws.txt` for `boto3`.
-- Updated `apps/binance-producer/Dockerfile` with build arg
-  `INSTALL_AWS_DEPS=true` for AWS images, leaving the default on-prem image
-  path unchanged.
+- `apps/binance-producer/aws.py` now writes Avro binary Kinesis record data
+  based on `contracts/market-candle/v1.avsc`.
+- Kinesis partition key remains `symbol|interval`.
+- `apps/binance-producer/avro_codec.py` was added for Avro encode/decode
+  support, with `fastavro` support and a fixed-schema fallback for tests.
+- `apps/binance-producer/requirements-aws.txt` now includes `fastavro`.
+
+Shared jobs logic:
+
+- Added `jobs/utils/bronze.py` for shared Avro decoding, Bronze valid output
+  and Bronze rejected output.
+- Added `jobs/utils/silver.py` and moved the pure `build_silver` logic there.
+- Added `jobs/utils/aws_args.py` for simple Glue-style argument parsing.
+- Updated local `jobs/bronze-ingestion/main.py` to use the shared Bronze Avro
+  helper while preserving Confluent Avro header stripping.
+- Updated local `jobs/silver-transformation/main.py` to import shared
+  `build_silver`.
+
+AWS lake entry points:
+
+- Added `jobs/raw-consumer/aws.py`:
+  - reads Avro records from Kinesis with Glue Streaming;
+  - writes Raw Parquet envelope rows to S3;
+  - preserves Kinesis metadata and `is_avro_decodable`;
+  - partitions by `symbol`, `interval`, `ingestion_date`, `ingestion_hour`.
+- Added `jobs/bronze-ingestion/aws.py`:
+  - reads Raw S3;
+  - decodes direct Avro binary payloads;
+  - writes Bronze S3 and rejected Bronze S3.
+- Added `jobs/silver-transformation/aws.py`:
+  - reads Bronze S3;
+  - applies shared Silver quality and deduplication rules;
+  - writes Silver S3 for `jobs/gold-indicators/aws.py`.
+
+Terraform AWS:
+
+- Extended `infra/aws/batch` rather than creating a parallel stack.
+- Added Raw, Bronze, rejected and checkpoint prefixes.
+- Added Raw and Bronze Glue Catalog databases/tables.
+- Added uploaded Glue scripts for Raw, Bronze and Silver.
+- Added upload of `contracts/market-candle/v1.avsc` for Glue jobs.
+- Added dedicated least-privilege roles:
+  - `glue-raw-streaming-role`;
+  - `glue-lake-transform-role`.
+- Added Glue jobs:
+  - Avro Kinesis -> Raw S3 streaming;
+  - Raw S3 -> Bronze S3 batch;
+  - Bronze S3 -> Silver S3 batch.
+- Added outputs for lake paths and lake ingestion Glue job names.
+- Did not add DynamoDB, Lambda, API Gateway, Streamlit, Budgets, RDS or AWS
+  PostgreSQL resources.
 
 Tests:
 
-- Added `tests/test_producer_aws.py` for Kinesis payload shape, partition key
-  and batching.
-- Updated `tests/test_contract.py` so the no-RDS contract checks Terraform AWS
-  resources instead of rejecting the word `RDS` when documentation mentions it
-  as an excluded service.
-
-Terraform AWS core:
-
-- Added `infra/aws/core`:
-  - Kinesis Data Stream;
-  - ECR repository;
-  - ECS cluster;
-  - ECS Fargate task definition and service;
-  - ECS task role scoped to Kinesis writes;
-  - ECS task execution role scoped to ECR image pull and producer logs;
-  - CloudWatch log group;
-  - outbound-only security group and Fargate subnet wiring variables.
-- Added `infra/aws/core/README.md` with manual build/tag/push commands and
-  runtime proof boundaries.
-
-Glue/Spark packaging:
-
-- Updated `infra/aws/batch` so Glue script, Python zips and SQL files use a
-  versioned artifact key prefix:
-  `glue_artifacts_prefix/glue_artifact_version`.
-- Added `glue_artifact_key_prefix` output.
-- Updated `infra/aws/batch/README.md` to document local-dev artifacts and the
-  future CI/CD responsibility.
+- Updated `tests/test_producer_aws.py` for Avro binary payloads.
+- Updated `tests/test_utils_transforms.py` for Bronze rejected records and the
+  shared Silver contract.
+- Extended `tests/test_contract.py` forbidden AWS service scans.
 
 Documentation:
 
-- Updated `docs/aws-service-iam-decisions.md` to mark Kinesis, ECS/Fargate,
-  ECR/IAM and producer logs as prepared, with AWS runtime proof still missing.
-- Updated this `docs/phase-handoff.md`.
+- Updated `docs/aws-lake-ingestion-cadrage.md` from JSON to Avro binary.
+- Updated `docs/aws-service-iam-decisions.md` with Avro Kinesis and deferred
+  Glue Schema Registry full integration.
+- Updated `docs/aws-core-portability-cadrage.md`, `docs/aws-phase-prompts.md`,
+  `infra/aws/core/README.md`, `infra/aws/batch/README.md`, `jobs/README.md`
+  and `cadrage.md`.
 
-## Key Files
+## Decisions Taken
 
-- `apps/binance-producer/aws.py`: AWS Kinesis producer entry point.
-- `apps/binance-producer/common.py`: shared producer helpers used by Kafka and
-  Kinesis paths.
-- `apps/binance-producer/Dockerfile`: optional AWS dependency install through
-  `INSTALL_AWS_DEPS=true`.
-- `tests/test_producer_aws.py`: Kinesis payload and partition-key tests.
-- `infra/aws/core`: producer Kinesis/ECR/ECS/Fargate/IAM/logs stack.
-- `infra/aws/batch`: Glue artifact packaging with explicit version segment.
-- `docs/aws-service-iam-decisions.md`: current AWS service/IAM status.
+- AWS Kinesis now targets Avro binary payloads based on the canonical
+  `contracts/market-candle/v1.avsc` contract.
+- Full AWS Glue Schema Registry integration is not implemented in this phase;
+  it remains deferred because it would expand the producer/runtime scope.
+- Raw storage remains Parquet on both local and AWS paths.
+- Local Kafka keeps Confluent Avro framing; AWS Kinesis uses direct Avro binary
+  payloads.
+- Bronze owns decoding and first technical validity checks.
+- Silver owns closed-candle filtering, OHLCV quality and deduplication.
+- AWS runtime validation is still not the next step until the AWS path can be
+  deployed in a real account.
 
 ## Validation Completed
 
-Python unit test attempt on the Windows host:
-
-```powershell
-python -m unittest tests.test_producer_aws tests.test_producer_model tests.test_contract -v
-```
-
-Result: failed before running tests because the WindowsApps Python launcher
-could not create the Python process.
-
-```powershell
-py -3 -m unittest tests.test_producer_aws tests.test_producer_model tests.test_contract -v
-```
-
-Result: failed before running tests because `py` is not installed or not on
-`PATH`.
-
-Terraform formatting:
-
-```powershell
-terraform fmt -recursive infra/aws
-```
-
-Result: exit 0; formatted `infra\aws\core\main.tf`.
-
-```powershell
-terraform fmt -check -recursive infra/aws
-```
-
-Result: exit 0.
-
-Terraform initialization:
-
-```powershell
-terraform -chdir=infra/aws/core init -backend=false
-```
-
-Result: exit 0 after network approval; installed `hashicorp/aws v5.100.0` and
-created `infra/aws/core/.terraform.lock.hcl`.
-
-```powershell
-terraform -chdir=infra/aws/batch init -backend=false
-```
-
-Result: exit 0 after network approval; reused `hashicorp/archive v2.8.0` and
-`hashicorp/aws v5.100.0`.
-
-Terraform validation:
-
-```powershell
-terraform -chdir=infra/aws/core validate
-terraform -chdir=infra/aws/batch validate
-```
-
-Result: both returned `Success! The configuration is valid.`
-
-Forbidden AWS Terraform scans:
-
-```powershell
-rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"
-rg -n "aws_dynamodb|aws_lambda|aws_api_gateway|aws_apigateway|aws_budgets_budget" infra/aws -g "*.tf"
-```
-
-Result: no matches for either scan.
-
-Repo validation:
+Static and local validations completed:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\platform.ps1 test
+terraform fmt -check -recursive infra/aws
+terraform -chdir=infra/aws/core validate
+terraform -chdir=infra/aws/batch validate
+rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"
+rg -n "aws_dynamodb|aws_lambda|aws_api_gateway|aws_apigateway|aws_budgets_budget" infra/aws -g "*.tf"
+git diff --check
+git status --short
 ```
 
-Result:
+- `platform.ps1 test`: passed, 23 tests OK. The first sandboxed attempt was
+  blocked by local Docker pipe permissions, then the same command passed after
+  running with the required Docker access.
+- `terraform fmt -check -recursive infra/aws`: passed.
+- `terraform -chdir=infra/aws/core validate`: passed.
+- `terraform -chdir=infra/aws/batch validate`: passed.
+- Forbidden Terraform resource scans returned no match for AWS PostgreSQL/RDS,
+  DynamoDB, Lambda, API Gateway or Budgets.
+- Stale JSON-related AWS wording scan returned no match for the replaced Avro
+  payload decision.
+- `git diff --check`: passed. Git reported CRLF normalization warnings only.
 
-- first sandboxed run failed on Docker access:
-  `open C:\Users\julie\.docker\config.json: Access is denied` and
-  `open //./pipe/docker_engine: Access is denied`;
-- rerun with approved elevated Docker access passed:
-  `Ran 21 tests in 39.433s` and `OK`;
-- the run printed a non-blocking orphan-container warning for
-  `big-data-platform-raw-consumer-market-candles-1`.
-
-AWS runtime:
-
-- `terraform plan` was not run because AWS credentials/account access are not
-  available in this environment.
-- No AWS runtime validation was claimed.
+No `terraform plan`, `terraform apply`, AWS CLI deployment, Glue run or AWS
+runtime check belongs to this phase.
 
 ## Proof Obtained
 
-- Kafka/on-prem producer entry point remains `apps/binance-producer/main.py`.
-- AWS producer entry point exists at `apps/binance-producer/aws.py`.
-- AWS producer records use canonical JSON matching
-  `contracts/market-candle/v1.avsc`.
-- Kinesis partition key is `symbol|interval`.
-- Kinesis batching is unit-tested.
-- `infra/aws/core` statically validates for Kinesis, ECR, ECS/Fargate, IAM and
-  logs.
-- `infra/aws/batch` still statically validates after versioned Glue artifact
-  key hardening.
-- Static scans found no AWS RDS/PostgreSQL resources and no DynamoDB, Lambda,
-  API Gateway or Budgets Terraform resources.
-- The repo unit/static test surface passes in the Docker Spark client.
+- The repo now contains static code and Terraform for Avro Kinesis -> Raw S3 ->
+  Bronze S3 -> Silver S3.
+- The AWS producer record test verifies Avro binary payloads and partition key
+  behavior.
+- Shared Silver logic is reusable by local and AWS entry points.
+- Terraform now has dedicated lake ingestion IAM boundaries.
 
 ## Not Yet Proven
 
-- AWS producer image has not been built locally with `INSTALL_AWS_DEPS=true`.
-- Producer image has not been pushed to ECR.
-- `terraform plan` and `terraform apply` are not proven.
+- AWS producer image has not been built or pushed to ECR.
 - ECS service steady state is not proven.
-- CloudWatch producer logs are not proven.
 - Kinesis record ingestion is not proven in AWS.
-- The Kinesis -> S3 Raw/Bronze/Silver AWS ingestion path is still not
-  implemented.
-- Silver Parquet data in S3 was not verified.
-- Glue job execution was not started.
-- S3 Gold/trading_gold Parquet outputs were not verified.
+- Glue Streaming has not consumed Kinesis.
+- Raw/Bronze/Silver S3 datasets have not been produced in AWS.
+- Silver Parquet data in S3 was not verified by the Gold Glue job.
+- Glue Gold job execution was not started.
+- Gold and `trading_gold` S3 outputs were not verified.
 - Glue Data Catalog tables were not verified in AWS.
 - Athena query execution was not verified.
 - CI/CD still does not build/push the producer image or publish immutable Glue
   artifacts.
+- Full Glue Schema Registry integration remains unimplemented and uncadred.
 
 ## Next Recommended Phase
 
-Recommended next phase: cadrage of the missing Kinesis -> S3 Raw/Bronze/Silver
-lake ingestion path.
+Recommended next phase: cadrage of the later AWS restitution/API/observability
+scope.
 
-Do not make AWS runtime validation the next phase, even if credentials become
-available. Runtime validation should happen only after the selected AWS path has
-been framed and implemented: producer/Kinesis/ECS, Kinesis -> S3
-Raw/Bronze/Silver, Glue Gold/trading_gold and any later API/dashboard/
-observability surfaces explicitly included in scope.
+Do not make AWS runtime validation the next phase yet. Runtime validation should
+happen only after the selected AWS path has been implemented and a real AWS
+account is available: producer/Kinesis/ECS, Kinesis -> S3 Raw/Bronze/Silver,
+Glue Gold/trading_gold and any later API/dashboard/observability surfaces
+explicitly included in scope.
 
-Use the `Phase 3 prompt - Kinesis to S3 Raw/Bronze/Silver cadrage` section in
-`docs/aws-phase-prompts.md`.
-
-Suggested cadrage scope:
-
-1. Audit on-prem `jobs/raw-consumer`, `jobs/bronze-ingestion`,
-   `jobs/silver-transformation`, shared schemas and quality helpers.
-2. Define the AWS Raw S3 contract from Kinesis: envelope, metadata,
-   partitions, checkpointing and decode/error status.
-3. Define Bronze decoding and technical validation on S3.
-4. Define Silver typed/deduplicated closed candles on S3, compatible with
-   `jobs/gold-indicators/aws.py`.
-5. Decide Glue Streaming ETL or another justified processing pattern, with IAM,
-   S3 prefixes, logs, costs and static tests.
-6. Produce the implementation prompt for that lake ingestion path.
-
-Do not implement in the next phase unless explicitly recadred:
-
-- DynamoDB latest metrics;
-- API Gateway/Lambda API;
-- Streamlit/local dashboard support;
-- advanced CloudWatch alarms;
-- AWS Budgets;
-- AWS PostgreSQL/RDS.
+Use the `Phase 5 prompt - Restitution, API and observability cadrage` section
+in `docs/aws-phase-prompts.md`.
 
 ## Required Start Checklist for Next Agent
 
@@ -340,9 +253,16 @@ Before changing files, the next agent must:
 3. Read this `docs/phase-handoff.md`.
 4. Read `docs/phase-template.md`.
 5. Read `docs/aws-service-iam-decisions.md`.
-6. Inspect the real repo with `git status --short`, `rg` and direct file reads.
-7. Do not revert unrelated existing changes.
-8. Distinguish implementation, static validation and real AWS runtime proof.
+6. Read `docs/aws-phase-prompts.md`.
+7. Inspect the real repo with `git status --short`, `rg` and direct file reads.
+8. Do not revert unrelated existing changes.
+9. Distinguish implementation, static validation and real AWS runtime proof.
 
 Do not mark a phase as runtime-validated unless the actual runtime surfaces were
 checked.
+
+## Suggested Commit Message
+
+```text
+feat: add AWS Avro lake ingestion path
+```

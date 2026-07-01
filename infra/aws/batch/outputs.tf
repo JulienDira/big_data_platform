@@ -3,9 +3,29 @@ output "lake_bucket_name" {
   value       = aws_s3_bucket.lake.bucket
 }
 
+output "raw_output_path" {
+  description = "S3 path where the Raw Glue Streaming job writes Kinesis Avro envelopes."
+  value       = local.raw_output_path
+}
+
+output "bronze_output_path" {
+  description = "S3 path where the Bronze Glue job writes decoded market candles."
+  value       = local.bronze_output_path
+}
+
 output "silver_input_path" {
   description = "S3 path expected by jobs/gold-indicators/aws.py for Silver input."
   value       = local.silver_input_path
+}
+
+output "bronze_rejected_output_path" {
+  description = "S3 path where the Bronze Glue job writes rejected records."
+  value       = local.bronze_rejected_output_path
+}
+
+output "raw_checkpoint_path" {
+  description = "S3 path used by the Raw Glue Streaming checkpoint."
+  value       = local.raw_checkpoint_path
 }
 
 output "gold_output_path" {
@@ -26,6 +46,15 @@ output "glue_databases" {
 output "glue_job_name" {
   description = "Glue Spark batch job name."
   value       = aws_glue_job.gold_indicators_batch.name
+}
+
+output "lake_ingestion_glue_job_names" {
+  description = "Glue job names for Raw, Bronze and Silver lake ingestion."
+  value = {
+    raw_streaming = aws_glue_job.raw_market_candles_streaming.name
+    bronze_batch  = aws_glue_job.bronze_market_candles_batch.name
+    silver_batch  = aws_glue_job.silver_market_candles_batch.name
+  }
 }
 
 output "glue_artifact_key_prefix" {

@@ -1,5 +1,7 @@
 locals {
   glue_databases = {
+    raw          = var.raw_database_name
+    bronze       = var.bronze_database_name
     silver       = var.silver_database_name
     gold         = var.gold_database_name
     trading_gold = var.trading_gold_database_name
@@ -30,6 +32,19 @@ locals {
     "projection.interval.values" = join(",", var.partition_projection_intervals)
   }
 
+  projection_ingestion_hour = {
+    "projection.ingestion_hour.type"   = "integer"
+    "projection.ingestion_hour.range"  = "0,23"
+    "projection.ingestion_hour.digits" = "1"
+  }
+
+  symbol_interval_ingestion_partitions = [
+    { name = "symbol", type = "string" },
+    { name = "interval", type = "string" },
+    { name = "ingestion_date", type = "date" },
+    { name = "ingestion_hour", type = "int" },
+  ]
+
   event_date_symbol_interval_partitions = [
     { name = "event_date", type = "date" },
     { name = "symbol", type = "string" },
@@ -39,6 +54,39 @@ locals {
   event_date_symbol_partitions = [
     { name = "event_date", type = "date" },
     { name = "symbol", type = "string" },
+  ]
+
+  raw_columns = [
+    { name = "source", type = "string" },
+    { name = "stream_name", type = "string" },
+    { name = "partition_key", type = "string" },
+    { name = "sequence_number", type = "string" },
+    { name = "approximate_arrival_timestamp", type = "timestamp" },
+    { name = "value", type = "binary" },
+    { name = "payload_size_bytes", type = "int" },
+    { name = "is_avro_decodable", type = "boolean" },
+    { name = "ingested_at", type = "timestamp" },
+  ]
+
+  bronze_columns = [
+    { name = "event_id", type = "string" },
+    { name = "source", type = "string" },
+    { name = "open_time", type = "timestamp" },
+    { name = "close_time", type = "timestamp" },
+    { name = "open", type = "double" },
+    { name = "high", type = "double" },
+    { name = "low", type = "double" },
+    { name = "close", type = "double" },
+    { name = "volume", type = "double" },
+    { name = "quote_asset_volume", type = "double" },
+    { name = "number_of_trades", type = "bigint" },
+    { name = "taker_buy_base_asset_volume", type = "double" },
+    { name = "taker_buy_quote_asset_volume", type = "double" },
+    { name = "is_closed", type = "boolean" },
+    { name = "ingested_at", type = "timestamp" },
+    { name = "year", type = "int" },
+    { name = "month", type = "int" },
+    { name = "day", type = "int" },
   ]
 
   silver_columns = [
@@ -133,12 +181,54 @@ locals {
     local.projection_interval,
   )
 
+  raw_projection = merge(
+    {
+      "projection.enabled"                      = "true"
+      "projection.ingestion_date.type"          = "date"
+      "projection.ingestion_date.format"        = "yyyy-MM-dd"
+      "projection.ingestion_date.range"         = var.partition_projection_date_range
+      "projection.ingestion_date.interval"      = "1"
+      "projection.ingestion_date.interval.unit" = "DAYS"
+    },
+    local.projection_symbol,
+    local.projection_interval,
+    local.projection_ingestion_hour,
+  )
+
   date_symbol_projection = merge(
     local.projection_event_date,
     local.projection_symbol,
   )
 
   glue_tables = {
+    raw_market_candles = {
+      database_key   = "raw"
+      name           = "market_candles"
+      location       = local.raw_output_path
+      columns        = local.raw_columns
+      partition_keys = local.symbol_interval_ingestion_partitions
+      parameters = merge(
+        local.raw_projection,
+        {
+          "storage.location.template" = "${local.raw_output_path}/symbol=$${symbol}/interval=$${interval}/ingestion_date=$${ingestion_date}/ingestion_hour=$${ingestion_hour}/"
+        },
+      )
+    }
+
+    bronze_market_candles = {
+      database_key   = "bronze"
+      name           = "market_candles"
+      location       = local.bronze_output_path
+      columns        = local.bronze_columns
+      partition_keys = local.event_date_symbol_interval_partitions
+      parameters = merge(
+        local.date_symbol_interval_projection,
+        {
+          "storage.location.template" = "${local.bronze_output_path}/event_date=$${event_date}/symbol=$${symbol}/interval=$${interval}/"
+        },
+      )
+    }
+
     silver_market_candles = {
       database_key   = "silver"
       name           = "market_candles"

@@ -56,10 +56,12 @@ Decision:
 - The AWS entry point should reuse the same Binance fetch/normalization
   behavior and replace only the output adapter: Kafka producer out,
   Kinesis publisher in.
-- For the first implementation, publish one canonical candle record per
-  Kinesis record as UTF-8 JSON matching `contracts/market-candle/v1.avsc`.
-  Do not introduce AWS Glue Schema Registry or another schema service unless a
-  later cadrage explicitly chooses it.
+- For the AWS lake ingestion implementation, publish one canonical candle
+  record per Kinesis record as Avro binary matching
+  `contracts/market-candle/v1.avsc`.
+- Do not introduce full AWS Glue Schema Registry integration in this phase.
+  It remains a later cadrage topic because the official Kinesis integrations
+  are mostly Java/Serde oriented and would expand the producer scope.
 - Use Kinesis partition keys in the same domain shape as Kafka keys:
   `symbol|interval`.
 - Keep the first ECS deployment to one service/task handling configured CSV

@@ -150,7 +150,7 @@ Frame the missing AWS lake ingestion path from Kinesis to S3 Raw/Bronze/Silver
 before implementation.
 
 Context:
-The producer can publish canonical market candle JSON records to Kinesis, and
+The producer can publish canonical market candle Avro records to Kinesis, and
 the AWS batch Gold job can read Silver Parquet from S3. The missing link is the
 AWS ingestion/lake path that consumes Kinesis and produces Raw, Bronze and
 Silver datasets on S3.
@@ -184,7 +184,7 @@ Expected deliverables:
 - update cadrage.md only if the phase order or architecture rules changed.
 ```
 
-## Phase 4 prompt - Kinesis to S3 Raw/Bronze/Silver implementation
+## Phase 4 prompt - Avro Kinesis to S3 Raw/Bronze/Silver implementation
 
 Run this only after Phase 3 has produced and accepted the lake ingestion
 cadrage.
@@ -195,8 +195,8 @@ Implement the AWS lake ingestion path defined by
 docs/aws-lake-ingestion-cadrage.md.
 
 In scope, only if confirmed by the cadrage:
-- AWS entry points/adapters for Kinesis -> Raw S3;
-- Bronze decoding and technical validation to S3;
+- AWS entry points/adapters for Avro Kinesis -> Raw S3;
+- Bronze Avro decoding and technical validation to S3;
 - Silver typed/deduplicated closed-candle output to S3;
 - required Terraform/IAM/S3/log/checkpoint resources;
 - packaging for Glue Streaming ETL or the chosen processing service;

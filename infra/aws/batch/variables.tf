@@ -40,10 +40,38 @@ variable "force_destroy_buckets" {
   default     = false
 }
 
+variable "market_candles_stream_name" {
+  description = "Name of the Kinesis stream that receives Avro market candle records."
+  type        = string
+}
+
+variable "market_candles_stream_arn" {
+  description = "ARN of the Kinesis stream that receives Avro market candle records."
+  type        = string
+}
+
+variable "raw_dataset_prefix" {
+  description = "S3 prefix for the Raw Kinesis market candles dataset."
+  type        = string
+  default     = "raw/binance/market_candles"
+}
+
+variable "bronze_dataset_prefix" {
+  description = "S3 prefix for the Bronze market candles dataset."
+  type        = string
+  default     = "bronze/market_candles"
+}
+
 variable "silver_dataset_prefix" {
   description = "S3 prefix for the Silver market candles dataset."
   type        = string
   default     = "silver/market_candles"
+}
+
+variable "bronze_rejected_dataset_prefix" {
+  description = "S3 prefix for Bronze rejected market candle records."
+  type        = string
+  default     = "rejected/bronze/market_candles"
 }
 
 variable "gold_dataset_prefix" {
@@ -82,6 +110,18 @@ variable "silver_database_name" {
   default     = "silver"
 }
 
+variable "raw_database_name" {
+  description = "Glue database name for Raw datasets."
+  type        = string
+  default     = "raw"
+}
+
+variable "bronze_database_name" {
+  description = "Glue database name for Bronze datasets."
+  type        = string
+  default     = "bronze"
+}
+
 variable "gold_database_name" {
   description = "Glue database name for analytical Gold datasets."
   type        = string
@@ -110,6 +150,24 @@ variable "partition_projection_date_range" {
   description = "Athena partition projection range for event_date partitions."
   type        = string
   default     = "2025-01-01,NOW"
+}
+
+variable "raw_checkpoint_prefix" {
+  description = "S3 prefix for the Raw Glue Streaming checkpoint."
+  type        = string
+  default     = "checkpoints/raw/binance/market_candles"
+}
+
+variable "kinesis_starting_position" {
+  description = "Starting position used by the Raw Glue Streaming job."
+  type        = string
+  default     = "TRIM_HORIZON"
+}
+
+variable "raw_trigger_interval" {
+  description = "Processing trigger interval for the Raw Glue Streaming job."
+  type        = string
+  default     = "30 seconds"
 }
 
 variable "glue_version" {

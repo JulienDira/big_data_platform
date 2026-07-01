@@ -52,6 +52,11 @@ class ContractTest(unittest.TestCase):
         self.assertIn("Athena", cadrage)
         self.assertNotIn("aws_db", terraform_sources)
         self.assertNotIn("aws_rds", terraform_sources)
+        self.assertNotIn("aws_dynamodb", terraform_sources)
+        self.assertNotIn("aws_lambda", terraform_sources)
+        self.assertNotIn("aws_api_gateway", terraform_sources)
+        self.assertNotIn("aws_apigateway", terraform_sources)
+        self.assertNotIn("aws_budgets_budget", terraform_sources)
 
     def test_gold_and_serving_entrypoints_use_common_helpers(self):
         gold_main = (ROOT / "jobs/gold-indicators/main.py").read_text(encoding="utf-8")

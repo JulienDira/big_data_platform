@@ -1,5 +1,5 @@
 output "kinesis_stream_name" {
-  description = "Kinesis stream receiving canonical market candle JSON records."
+  description = "Kinesis stream receiving canonical market candle Avro records."
   value       = aws_kinesis_stream.market_candles.name
 }
 

@@ -313,6 +313,9 @@ Contraintes:
   packaging ECR, jobs Spark vers Glue, artefacts S3, Terraform et CI/CD;
 - cadrer puis implementer ensuite le maillon Kinesis -> S3 Raw/Bronze/Silver
   avant toute validation runtime AWS globale;
+- viser le contrat Avro canonique aussi cote Kinesis AWS; JSON reste acceptable
+  comme simplification POC ponctuelle, mais la cible retenue est Avro binaire
+  dans Kinesis et Parquet dans le lake;
 - garder `jobs/utils` comme couche commune initiale;
 - reutiliser la logique de restitution commune avant d'ajouter les surfaces
   streaming/API qui en dependent;

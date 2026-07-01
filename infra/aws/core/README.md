@@ -6,7 +6,7 @@ Minimal core stack for the AWS producer path.
 
 Creates only the durable producer runtime resources:
 
-- Kinesis Data Stream for canonical market candle JSON records.
+- Kinesis Data Stream for canonical market candle Avro records.
 - ECR repository for the Binance producer image.
 - ECS cluster, Fargate task definition and service.
 - Dedicated ECS task role and task execution role.
