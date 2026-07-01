@@ -1,0 +1,49 @@
+output "lake_bucket_name" {
+  description = "S3 bucket for Silver, Gold and trading_gold datasets."
+  value       = aws_s3_bucket.lake.bucket
+}
+
+output "silver_input_path" {
+  description = "S3 path expected by jobs/gold-indicators/aws.py for Silver input."
+  value       = local.silver_input_path
+}
+
+output "gold_output_path" {
+  description = "S3 path where the Glue job writes analytical Gold indicators."
+  value       = local.gold_output_path
+}
+
+output "trading_gold_output_base_path" {
+  description = "S3 base path where the Glue job writes trading_gold restitution datasets."
+  value       = local.trading_gold_output_base_path
+}
+
+output "glue_databases" {
+  description = "Glue Data Catalog database names."
+  value       = local.glue_databases
+}
+
+output "glue_job_name" {
+  description = "Glue Spark batch job name."
+  value       = aws_glue_job.gold_indicators_batch.name
+}
+
+output "glue_artifact_key_prefix" {
+  description = "S3 key prefix used for the Glue script, Python zips and SQL files."
+  value       = local.glue_artifact_key_prefix
+}
+
+output "glue_cloudwatch_log_group_name" {
+  description = "CloudWatch log group used by the Glue Spark batch job."
+  value       = aws_cloudwatch_log_group.glue_jobs.name
+}
+
+output "athena_workgroup_name" {
+  description = "Athena workgroup configured for batch validation queries."
+  value       = aws_athena_workgroup.batch.name
+}
+
+output "athena_output_location" {
+  description = "S3 location used for Athena query results."
+  value       = local.athena_output_location
+}

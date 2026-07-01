@@ -1,8 +1,7 @@
-import json
 import logging
 import os
-import time
 from pathlib import Path
+import time
 
 import requests
 from confluent_kafka import SerializingProducer
@@ -10,7 +9,7 @@ from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 from confluent_kafka.serialization import StringSerializer
 
-from model import normalize_kline
+from common import build_partition_key, csv_env, fetch_latest, required_env
 
 
 logging.basicConfig(
@@ -18,17 +17,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 LOGGER = logging.getLogger("binance-producer")
-
-
-def required_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
-
-
-def csv_env(name: str) -> list[str]:
-    return [item.strip().upper() for item in required_env(name).split(",") if item.strip()]
 
 
 def load_schema() -> str:
@@ -62,25 +50,6 @@ def build_producer() -> SerializingProducer:
     )
 
 
-def fetch_latest(session: requests.Session, base_url: str, symbol: str, interval: str) -> dict:
-    response = session.get(
-        f"{base_url}/api/v3/klines",
-        params={"symbol": symbol, "interval": interval, "limit": 2},
-        timeout=10,
-    )
-    response.raise_for_status()
-    rows = response.json()
-    if not isinstance(rows, list) or not rows:
-        raise ValueError(f"Unexpected Binance response: {json.dumps(rows)[:200]}")
-    closed_rows = [row for row in rows if int(row[6]) < int(time.time() * 1000)]
-    return normalize_kline(
-        symbol,
-        interval,
-        (closed_rows or rows)[-1],
-        now_ms=int(time.time() * 1000),
-    )
-
-
 def main() -> None:
     topic = required_env("KAFKA_TOPIC")
     symbols = csv_env("MARKET_SYMBOLS")
@@ -100,7 +69,7 @@ def main() -> None:
                         continue
                     producer.produce(
                         topic=topic,
-                        key=f"{symbol}|{interval.lower()}",
+                        key=build_partition_key(candle),
                         value=candle,
                         on_delivery=delivery_report,
                     )

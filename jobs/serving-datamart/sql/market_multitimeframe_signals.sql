@@ -122,6 +122,5 @@ SELECT
     WHEN signal_score <= -2 THEN 'bearish'
     ELSE 'neutral'
   END AS signal_label,
-  current_timestamp() AS generated_at
+  {{processing_timestamp}} AS generated_at
 FROM scored
-

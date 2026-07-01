@@ -10,26 +10,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 if PYSPARK_AVAILABLE:
     sys.path.insert(0, str(ROOT / "jobs"))
-    from pyspark.sql import SparkSession
 
+    from spark_test_utils import create_local_spark
     from utils.indicators import calculate_indicators
 else:
-    SparkSession = None
+    create_local_spark = None
 
 
 @unittest.skipUnless(PYSPARK_AVAILABLE, "PySpark is not available")
 class GoldIndicatorsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.spark = (
-            SparkSession.builder.master("local[1]")
-            .appName("gold-indicators-test")
-            .config("spark.ui.enabled", "false")
-            .config("spark.eventLog.enabled", "false")
-            .config("spark.hadoop.fs.defaultFS", "file:///")
-            .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
-            .getOrCreate()
-        )
+        cls.spark = create_local_spark("gold-indicators-test")
 
     @classmethod
     def tearDownClass(cls):

@@ -9,24 +9,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 if PYSPARK_AVAILABLE:
     sys.path.insert(0, str(ROOT / "jobs"))
-    from pyspark.sql import SparkSession
 
+    from spark_test_utils import create_local_spark
     from utils.dedup import latest_by_key
     from utils.quality import apply_silver_quality_rules
 else:
-    SparkSession = None
+    create_local_spark = None
 
 
 @unittest.skipUnless(PYSPARK_AVAILABLE, "PySpark is not available")
 class UtilsTransformsTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.spark = (
-            SparkSession.builder.master("local[1]")
-            .appName("utils-transforms-test")
-            .config("spark.ui.enabled", "false")
-            .getOrCreate()
-        )
+        cls.spark = create_local_spark("utils-transforms-test")
 
     @classmethod
     def tearDownClass(cls):
@@ -92,4 +87,3 @@ class UtilsTransformsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -21,12 +21,24 @@ class ServingRegistryTest(unittest.TestCase):
             sql_path = ROOT / "jobs/serving-datamart/sql" / table.sql_file
             self.assertTrue(sql_path.exists(), table.sql_file)
 
+    def test_declared_tables_include_aws_partition_contract(self):
+        partitions = {
+            table.name: table.partition_columns
+            for table in MODULE.get_serving_tables()
+        }
+
+        self.assertEqual(("event_date", "symbol", "interval"), partitions["market_indicators"])
+        self.assertEqual((), partitions["market_indicators_latest"])
+        self.assertEqual((), partitions["market_multitimeframe_signals"])
+        self.assertEqual(("event_date", "symbol"), partitions["market_daily_summary"])
+
     def test_sql_templates_render_without_placeholders(self):
         context = {
             "source_view": "gold_market_indicators",
             "base_interval": "1m",
             "context_interval_1": "15m",
             "context_interval_2": "1h",
+            "processing_timestamp": "current_timestamp()",
         }
 
         for table in MODULE.get_serving_tables():

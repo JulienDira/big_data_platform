@@ -1,0 +1,59 @@
+{
+  "processing_timestamp": "2025-01-02T00:00:00",
+  "gold_last_1m": {
+    "symbol": "BTCUSDC",
+    "interval": "1m",
+    "open_time": "2025-01-01 01:29:00",
+    "close_time": "2025-01-01 01:29:59",
+    "open": 30.0,
+    "high": 31.0,
+    "low": 29.0,
+    "close": 30.0,
+    "volume": 10.0,
+    "ema_12": 24.543291,
+    "ema_26": 18.841594,
+    "macd": 5.701697,
+    "rsi_14": 100.0,
+    "bollinger_middle": 20.5,
+    "bollinger_upper": 32.032563,
+    "bollinger_lower": 8.967437
+  },
+  "serving_latest_1m": {
+    "symbol": "BTCUSDC",
+    "interval": "1m",
+    "open_time": "2025-01-01 01:29:00",
+    "close": 30.0,
+    "macd": 5.701697,
+    "event_date": "2025-01-01",
+    "updated_at": "2025-01-02 00:00:00"
+  },
+  "serving_signal_latest": {
+    "symbol": "BTCUSDC",
+    "base_interval": "1m",
+    "open_time": "2025-01-01 01:29:00",
+    "close": 30.0,
+    "macd_1m": 5.701697,
+    "trend_15m": "up",
+    "rsi_14_15m": 100.0,
+    "macd_15m": 1.595442,
+    "trend_1h": "up",
+    "rsi_14_1h": 100.0,
+    "macd_1h": 1.595442,
+    "signal_score": 3,
+    "signal_label": "bullish",
+    "generated_at": "2025-01-02 00:00:00"
+  },
+  "serving_daily_summary": {
+    "symbol": "BTCUSDC",
+    "event_date": "2025-01-01",
+    "open_price": 1.0,
+    "close_price": 30.0,
+    "high_price": 31.0,
+    "low_price": 0.0,
+    "daily_volume": 300.0,
+    "avg_rsi_14": 100.0,
+    "avg_macd": 3.117728,
+    "volatility_score": 8.803408,
+    "generated_at": "2025-01-02 00:00:00"
+  }
+}

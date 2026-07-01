@@ -25,7 +25,6 @@ SELECT
   bollinger_upper,
   bollinger_lower,
   event_date,
-  current_timestamp() AS updated_at
+  {{processing_timestamp}} AS updated_at
 FROM ranked
 WHERE row_number = 1
-

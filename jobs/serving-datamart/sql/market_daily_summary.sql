@@ -27,7 +27,6 @@ SELECT
   avg(rsi_14) AS avg_rsi_14,
   avg(macd) AS avg_macd,
   coalesce(stddev(close), 0.0) AS volatility_score,
-  current_timestamp() AS generated_at
+  {{processing_timestamp}} AS generated_at
 FROM ranked
 GROUP BY symbol, event_date
-
