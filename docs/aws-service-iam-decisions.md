@@ -26,7 +26,7 @@ Status values:
 | Grain | one closed candle per `(symbol, interval, open_time)` | Fait on-prem | Silver rules and tests cover deduplication/closed-candle semantics. |
 | Medallion layers | Raw, Bronze, Silver, Gold, Serving | Fait on-prem, Prepare AWS core/lake/batch | On-prem chain is proven; AWS producer, Kinesis -> S3 Raw/Bronze/Silver and Gold batch paths are prepared statically. AWS runtime proof is missing. |
 | Daily volume reference | 263880 rows/day per main layer | Prepare | Captured as sizing context, not enforced by runtime tests yet. |
-| Budget | 50 EUR maximum for controlled POC | Prepare, Budgets reporte | FinOps rules are documented; AWS Budgets must be cadre later before implementation. |
+| Budget | 50 EUR maximum for controlled POC | Prepare | `infra/aws/serving` declares an AWS Budget with 50%, 80% and 100% notification thresholds when an alert email is provided. AWS runtime proof is missing. |
 | Deployment | Terraform plus CI/CD | Prepare, CI/CD a developper | Terraform exists for batch and core producer resources; CI/CD still has to automate ECR image builds and versioned Glue artifacts. |
 
 ## Service decisions
@@ -42,10 +42,11 @@ Status values:
 | Storage | S3 with partitioned Parquet for Raw/Bronze/Silver/Gold | Prepare | Terraform creates S3 lake paths for Raw, Bronze, rejected, Silver, Gold and `trading_gold`. S3 runtime writes are not proven. |
 | Catalog | AWS Glue Data Catalog | Prepare | Terraform declares Raw, Bronze, Silver, Gold and `trading_gold` databases/tables. |
 | Analytics SQL | Athena on cataloged S3 tables | Prepare | Terraform declares an Athena workgroup/output location; query execution is not proven. |
-| Low-latency latest metrics | DynamoDB | Reporte, a cadrer later | Latest metrics cache only, not historical source of truth. Cadrer after the producer/lake/Glue core path. |
-| API backend | API Gateway plus Lambda | Reporte, a cadrer later | Exposure layer for dashboard/API use cases; not part of the next core AWS phase. |
-| Dashboard | Streamlit Cloud or local for POC | Reporte, a cadrer later | Chosen for FinOps; prepare after API/latest-metrics boundaries are defined. |
-| Observability | CloudWatch Logs, alarms, AWS Budgets | Prepare/Reporte | Glue and ECS producer log groups exist in Terraform; alarms and budgets require a later cadrage before implementation. |
+| Low-latency latest metrics | DynamoDB | Prepare | `infra/aws/serving` declares the latest metrics table keyed by `symbol` and `interval`; `apps/aws-serving-api/projection_handler.py` projects from `trading_gold.market_indicators_latest`. AWS runtime proof is missing. |
+| API backend | API Gateway plus Lambda | Prepare | `infra/aws/serving` declares a read-only HTTP API and Lambda for latest metrics, history, signals and daily summary. Lambda code does not compute indicators or write lake datasets. AWS runtime proof is missing. |
+| Dashboard | Streamlit Cloud by default, ECS/Fargate alternative if AWS-hosted UI is required | Prepare | `apps/streamlit-dashboard` is wired for Cognito Hosted UI and API Gateway only. No Streamlit Cloud deployment has been performed. |
+| Authentication | Amazon Cognito | Prepare | `infra/aws/serving` declares User Pool, Hosted UI domain, public Streamlit app client, `viewer` / `admin` groups and API Gateway JWT authorizer. AWS runtime proof is missing. |
+| Observability | CloudWatch Logs, alarms, AWS Budgets | Prepare | `infra/aws/serving` declares Lambda/API log groups, minimal CloudWatch alarms, optional SNS alerts, Glue failure event rule and AWS Budget. AWS runtime proof is missing. |
 
 Services explicitly rejected for this POC path: MSK, EMR, RDS, Redshift and
 Lake Formation. RDS/PostgreSQL must not be introduced as an AWS target for this
@@ -60,9 +61,11 @@ project scope.
 | `glue-raw-streaming-role` | Read Kinesis, write Raw S3, write Raw checkpoint/temp prefixes and logs | Prepare | Terraform declares the dedicated Raw streaming role and policy. AWS role execution is not proven. |
 | `glue-lake-transform-role` | Read Raw/Bronze S3, write Bronze/Silver/rejected S3, Glue Catalog and logs | Prepare | Terraform declares the dedicated Bronze/Silver transform role and policy. It must not write Gold, `trading_gold`, DynamoDB, API resources or PostgreSQL. |
 | `glue-batch-role` | Read/write required S3 prefixes, Glue Catalog, logs | Prepare | Terraform creates `${project}-${env}-glue-batch-role` with prefix-scoped S3 access. |
-| `lambda-api-role` | Read DynamoDB, limited Athena queries, logs | Reporte, a cadrer later | API target role; not part of the next core AWS phase. |
-| `athena-query-role` | Read S3 Gold/trading_gold, Glue Catalog | A cadrer | Current Terraform creates an Athena workgroup, not a separate query role. |
-| `monitoring-role` | Read metrics, logs and budgets | Reporte, a cadrer later | Monitoring and FinOps target role; cadrer after core AWS path. |
+| `lambda-api-role` | Read DynamoDB latest table, start/read bounded Athena queries, read required Glue/S3 Athena result metadata, write logs | Prepare | `infra/aws/serving` scopes the API Lambda role to DynamoDB reads, selected Athena workgroup, `trading_gold` Glue metadata, Athena result prefix and logs. It does not write lake datasets or connect to PostgreSQL. |
+| `dynamodb-latest-projection-role` | Read `trading_gold.market_indicators_latest`, write latest cache items, write logs | Prepare | `infra/aws/serving` declares a dedicated projection Lambda role. The API Lambda does not own projection writes. |
+| `cognito-auth-surface` | User Pool, Hosted UI, app client, groups and API Gateway JWT authorizer | Prepare | `infra/aws/serving` declares the Cognito User Pool, Hosted UI domain, public app client, `viewer` / `admin` groups and API JWT authorizer. |
+| `athena-query-role` | Read S3 Gold/trading_gold, Glue Catalog, Athena result location | Prepare | Athena access is scoped inside the API and projection Lambda roles rather than a standalone role; both use the selected workgroup and Athena result prefix only. |
+| `monitoring-role` | Read metrics, logs and budgets; publish notifications if SNS is retained | Prepare | `infra/aws/serving` declares alarms, optional SNS topic/subscription and AWS Budget. Runtime proof is missing. |
 
 IAM rule to preserve: each component gets a dedicated least-privilege role.
 The Raw streaming role must not modify Bronze, Silver or Gold directly. The
@@ -78,14 +81,14 @@ scoped to the input/output prefixes they consume and produce.
 | AWS batch starts with S3/Glue/Athena | Prepare | Terraform stack exists and validates locally. |
 | Cadrer producer/Kinesis/ECS/ECR and Glue packaging before implementation | Fait | The cadrage is documented in `docs/aws-core-portability-cadrage.md`; static implementation now exists for the producer core. |
 | Cadrer and implement Kinesis -> S3 Raw/Bronze/Silver before AWS runtime validation | Prepare | Cadrage, jobs and Terraform exist in the repo. AWS runtime proof is still missing. |
-| Defer DynamoDB/API/Lambda/Streamlit/advanced monitoring until dedicated cadrage | Reporte | These services are target decisions, but they should not be implemented before the core producer/lake/Glue path is cadre. |
+| Cadrer DynamoDB/API/Lambda/Streamlit/Cognito/advanced monitoring before implementation | Prepare | Dedicated cadrage lives in `docs/aws-serving-observability-cadrage.md`; static implementation now exists under `apps/aws-serving-api`, `apps/streamlit-dashboard` and `infra/aws/serving`. AWS runtime proof is missing. |
 | Gold indicators stay in Gold | Fait | On-prem Gold and AWS entry point both use shared indicator logic. |
 | Restitution tables are `trading_gold.*` on AWS | Prepare | Terraform declares Glue tables and the AWS job writes Parquet paths. |
 | Partition analytical datasets by date, symbol and interval | Prepare | Glue table projection uses `event_date`, `symbol`, `interval` where applicable. |
 | Use CloudWatch logs for Glue batch | Prepare | Log group and Glue continuous log arguments are declared. |
 | Apply least privilege IAM | Prepare | Glue batch policy is scoped to batch S3 prefixes, Glue Catalog and logs. |
 | Validate AWS runtime on S3/Glue/Athena | Reporte | Blocked until AWS credentials and target account access are available. |
-| Configure AWS Budgets | Reporte, a cadrer later | Required for full FinOps target, not part of current batch stack or next core cadrage. |
+| Configure AWS Budgets | Prepare | `infra/aws/serving` declares a 50 EUR monthly POC Budget with optional email notifications at 50%, 80% and 100%. AWS runtime proof is missing. |
 
 ## Next phase stance
 
@@ -94,8 +97,11 @@ Kinesis producer entry point, ECR/ECS/Fargate Terraform, producer IAM,
 versioned Glue artifact keys and Kinesis -> S3 Raw/Bronze/Silver jobs exist in
 the repo.
 
-The next phase is not AWS runtime validation. The next phase is the
-cadrage of the later restitution/API/observability scope.
+The later restitution/API/observability scope is now statically implemented in
+`apps/aws-serving-api`, `apps/streamlit-dashboard` and `infra/aws/serving`.
+The next phase should be AWS runtime validation only when a real AWS account,
+credentials, callback URLs, alert email and deployment permissions are
+available. CI/CD hardening remains separate from runtime proof.
 
 Runtime validation in AWS should happen only after the selected AWS path has
 been framed and implemented: producer/Kinesis/ECS, Kinesis -> S3
@@ -103,8 +109,8 @@ Raw/Bronze/Silver, Glue Gold/trading_gold and any later API/dashboard/
 observability surfaces explicitly included in scope.
 
 Runtime proof remains separate: S3, Glue, Athena, DynamoDB, API Gateway/Lambda,
-Kinesis, Glue Streaming, Streamlit and Budgets are not considered validated
-until checked in a real AWS account.
+Cognito, Kinesis, Glue Streaming, Streamlit and Budgets are not considered
+validated until checked in a real AWS account.
 
 ## Runtime proof boundary
 

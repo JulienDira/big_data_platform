@@ -9,11 +9,15 @@ memes traitements metier avec des entry points separes.
 | Environnement | Stack cible |
 |---|---|
 | On-premise actuel | Docker Compose, Kafka, Spark Submit vers YARN, HDFS, Hive, Airflow, PostgreSQL Serving |
-| AWS cible | ECS/Fargate ou EC2 Producer, Kinesis, Glue Spark, Glue Streaming ETL, S3, Glue Data Catalog, Athena, DynamoDB latest metrics, API Gateway/Lambda, Streamlit |
+| AWS cible | ECS/Fargate Producer, Kinesis, Glue Spark, Glue Streaming ETL, S3, Glue Data Catalog, Athena, DynamoDB latest metrics, API Gateway/Lambda, Cognito, Streamlit Cloud |
 
 Cette cible AWS est une trajectoire, pas un lot d'implementation unique.
 Producer/Kinesis/Glue/S3/Athena doivent etre cadres et implementes avant les
 surfaces DynamoDB, API Gateway/Lambda, Streamlit et monitoring/FinOps avances.
+Pour l'interface de consultation, Streamlit Cloud est le choix POC par defaut
+avec authentification Cognito et acces aux donnees uniquement via API Gateway.
+ECS/Fargate reste l'alternative si une interface Streamlit hebergee dans AWS
+devient obligatoire. EC2 n'est pas le choix v1 sauf decision explicite.
 
 PostgreSQL reste une cible de serving on-premise. Il n'est pas retenu comme
 cible AWS dans ce cadrage. Cote AWS, les restitutions actuellement publiees en
@@ -176,14 +180,16 @@ Ordre recommande:
    - completer Terraform, packaging et tests statiques sans revendiquer de
      validation runtime AWS globale.
 5. Phase de cadrage restitution/applicatif/observabilite:
-   - cadrer DynamoDB latest metrics, API Gateway/Lambda, Streamlit/local
-     dashboard, CloudWatch alarms et AWS Budgets;
+   - cadrer DynamoDB latest metrics, API Gateway/Lambda, Cognito,
+     Streamlit Cloud, CloudWatch alarms et AWS Budgets;
    - definir contrats, responsabilites, IAM, couts, cycle de vie et tests;
    - ne pas implementer avant decision explicite sur ce perimetre.
 6. Phase d'implementation restitution/applicatif/observabilite:
    - implementer uniquement ce qui a ete cadre dans la phase precedente;
    - garder DynamoDB comme cache latest metrics, pas comme source historique;
    - garder Athena/S3/Glue comme source analytique historique;
+   - garder Streamlit comme interface de consultation via API Gateway, pas
+     comme lecteur direct de S3, Athena ou DynamoDB;
    - valider statiquement/localement et ne declarer le runtime AWS prouve
      qu'apres verification dans un vrai compte AWS.
 7. Phase de validation runtime AWS globale:
@@ -251,6 +257,7 @@ apres le socle producer/lake/Glue.
 | Pas de PostgreSQL dans les transformations | Reutilisation on-prem/AWS |
 | Athena lit des tables cataloguees, il n'ecrit pas les donnees | Clarifie le role des briques AWS |
 | Contrats, producer/lake et Glue avant le wiring API/dashboard | Les surfaces API et dashboard dependent des schemas et sorties lake |
+| Streamlit Cloud + Cognito par defaut pour le dashboard POC | Simple, securise et limite l'exploitation serveur; ECS/Fargate seulement si l'UI doit etre hebergee dans AWS |
 | Cadrage technique avant implementation AWS large | Evite d'empiler les services sans decision claire de packaging, IAM et CI/CD |
 | Runtime AWS seulement avec preuves reelles | Evite de confondre implementation, tests statiques et deploiement effectif |
 | Pas de structure repo parallele inutile | Evite duplication et over-engineering |
@@ -269,7 +276,7 @@ Tests attendus:
 - validation runtime AWS cible seulement quand le chemin retenu est cadre,
   developpe et qu'un compte est disponible: Kinesis/ECS, ingestion
   Raw/Bronze/Silver S3, Glue Gold, Glue Catalog, Athena et seulement plus tard
-  DynamoDB/API/dashboard/observabilite si ces surfaces ont ete implementees.
+  DynamoDB/API/Cognito/dashboard/observabilite si ces surfaces ont ete implementees.
 
 Criteres d'acceptation:
 
@@ -307,8 +314,8 @@ Contraintes:
 - ne pas transformer l'absence de credentials AWS en blocage: developper et
   tester statiquement la cible AWS tant que le runtime n'est pas disponible;
 - ne pas ajouter de cible PostgreSQL AWS;
-- ne pas implementer DynamoDB, API Gateway/Lambda, Streamlit, CloudWatch alarms
-  ou AWS Budgets avant une phase de cadrage dediee;
+- ne pas implementer DynamoDB, API Gateway/Lambda, Cognito, Streamlit,
+  CloudWatch alarms ou AWS Budgets avant une phase de cadrage dediee;
 - cadrer d'abord l'exploitation du code existant: producer vers Kinesis/ECS,
   packaging ECR, jobs Spark vers Glue, artefacts S3, Terraform et CI/CD;
 - cadrer puis implementer ensuite le maillon Kinesis -> S3 Raw/Bronze/Silver
@@ -319,6 +326,8 @@ Contraintes:
 - garder `jobs/utils` comme couche commune initiale;
 - reutiliser la logique de restitution commune avant d'ajouter les surfaces
   streaming/API qui en dependent;
+- exposer Streamlit via API Gateway et Cognito; ne pas donner au dashboard
+  d'acces direct a S3, Athena, DynamoDB ou Glue dans le POC par defaut;
 - garder les entry points on-premise lisibles et fins;
 - documenter explicitement ce qui est valide statiquement et ce qui reste a
   prouver en runtime.

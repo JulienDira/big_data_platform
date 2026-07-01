@@ -3,6 +3,11 @@ output "lake_bucket_name" {
   value       = aws_s3_bucket.lake.bucket
 }
 
+output "athena_results_bucket_name" {
+  description = "S3 bucket used for Athena query results."
+  value       = aws_s3_bucket.athena_results.bucket
+}
+
 output "raw_output_path" {
   description = "S3 path where the Raw Glue Streaming job writes Kinesis Avro envelopes."
   value       = local.raw_output_path

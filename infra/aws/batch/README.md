@@ -17,8 +17,9 @@ Creates the AWS lake and batch runtime surface:
 - Athena workgroup and S3 query result location.
 
 This stack deliberately does not create RDS/PostgreSQL, DynamoDB, API Gateway,
-Lambda, Streamlit, alarms or Budgets resources. The Kinesis stream itself lives
-in `infra/aws/core`; this stack receives its name and ARN as variables.
+Lambda, Streamlit, alarms or Budgets resources. The later serving/API surface
+lives in `infra/aws/serving`. The Kinesis stream itself lives in
+`infra/aws/core`; this stack receives its name and ARN as variables.
 
 Glue scripts, Python zips and SQL files are uploaded below
 `glue_artifacts_prefix/glue_artifact_version`. The default

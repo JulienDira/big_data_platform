@@ -229,7 +229,8 @@ implementation.
 In scope:
 - DynamoDB latest metrics as a cache/projection only, not the historical source of truth;
 - API Gateway/Lambda API responsibilities and IAM;
-- Streamlit/local dashboard support and its data access mode;
+- Streamlit Cloud as the default POC dashboard target, plus ECS/Fargate as an AWS-hosted alternative only if needed;
+- Amazon Cognito authentication for Streamlit users and API Gateway JWT authorization;
 - CloudWatch logs, alarms and AWS Budgets;
 - cost controls, lifecycle and cleanup rules;
 - tests, runtime proof plan and implementation split.
@@ -258,7 +259,8 @@ defined by docs/aws-serving-observability-cadrage.md.
 In scope, only if confirmed by the cadrage:
 - DynamoDB latest metrics projection;
 - API Gateway/Lambda backend;
-- Streamlit/local dashboard support;
+- Cognito User Pool, Hosted UI, app client, groups and API Gateway JWT authorizer;
+- Streamlit Cloud wiring through API Gateway only, with ECS/Fargate as an optional AWS-hosted alternative if the cadrage requires it;
 - CloudWatch alarms and AWS Budgets;
 - least-privilege IAM;
 - static/local tests and Terraform validation.
@@ -266,6 +268,7 @@ In scope, only if confirmed by the cadrage:
 Out of scope:
 - RDS/PostgreSQL AWS;
 - replacing S3/Glue/Athena as the historical analytical source;
+- direct Streamlit access to DynamoDB, Athena, S3 or Glue;
 - claiming AWS runtime validation without real AWS checks.
 
 End of phase:
