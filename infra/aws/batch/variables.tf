@@ -87,15 +87,27 @@ variable "trading_gold_dataset_prefix" {
 }
 
 variable "glue_artifacts_prefix" {
-  description = "S3 prefix where Terraform uploads the Glue script and Python/SQL artifacts."
+  description = "S3 prefix where Glue script and Python/SQL artifacts are published."
   type        = string
-  default     = "artifacts/glue/gold-indicators"
+  default     = "artifacts/glue"
 }
 
 variable "glue_artifact_version" {
   description = "Version segment used below glue_artifacts_prefix for scripts, Python zips and SQL artifacts."
   type        = string
   default     = "local-dev"
+}
+
+variable "glue_artifact_bucket_name" {
+  description = "Optional S3 bucket containing CI-published Glue artifacts. Defaults to the lake bucket for local development."
+  type        = string
+  default     = null
+}
+
+variable "upload_glue_artifacts_from_workspace" {
+  description = "Upload Glue scripts and Python/SQL artifacts from the local workspace. Disable in CI when artifacts are published separately."
+  type        = bool
+  default     = true
 }
 
 variable "athena_output_prefix" {

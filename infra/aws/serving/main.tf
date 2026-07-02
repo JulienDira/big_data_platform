@@ -32,6 +32,14 @@ locals {
     "${local.name_prefix}-gold-indicators-batch",
   ]
   effective_glue_job_names = length(var.glue_job_names) > 0 ? var.glue_job_names : local.default_glue_job_names
+  lambda_package_s3_inputs = [
+    for value in [
+      var.lambda_package_s3_bucket,
+      var.lambda_package_s3_key,
+      var.lambda_package_source_hash,
+    ] : value if value != null && value != ""
+  ]
+  lambda_uses_s3_package = length(local.lambda_package_s3_inputs) == 3
 
   lambda_environment = {
     ALLOWED_INTERVALS            = join(",", var.allowed_intervals)
@@ -48,6 +56,8 @@ locals {
 }
 
 data "archive_file" "aws_serving_api" {
+  count = local.lambda_uses_s3_package ? 0 : 1
+
   type        = "zip"
   source_dir  = "${local.repo_root}/apps/aws-serving-api"
   output_path = "${path.module}/.terraform/aws-serving-api.zip"
@@ -96,8 +106,10 @@ resource "aws_cloudwatch_log_group" "api_gateway" {
 
 resource "aws_lambda_function" "api" {
   function_name    = local.api_lambda_name
-  filename         = data.archive_file.aws_serving_api.output_path
-  source_code_hash = data.archive_file.aws_serving_api.output_base64sha256
+  filename         = local.lambda_uses_s3_package ? null : data.archive_file.aws_serving_api[0].output_path
+  s3_bucket        = local.lambda_uses_s3_package ? var.lambda_package_s3_bucket : null
+  s3_key           = local.lambda_uses_s3_package ? var.lambda_package_s3_key : null
+  source_code_hash = local.lambda_uses_s3_package ? var.lambda_package_source_hash : data.archive_file.aws_serving_api[0].output_base64sha256
   handler          = "api_handler.lambda_handler"
   runtime          = var.lambda_runtime
   role             = aws_iam_role.api_lambda.arn
@@ -112,12 +124,21 @@ resource "aws_lambda_function" "api" {
     aws_cloudwatch_log_group.api_lambda,
     aws_iam_role_policy_attachment.api_lambda,
   ]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.lambda_package_s3_inputs) == 0 || local.lambda_uses_s3_package
+      error_message = "lambda_package_s3_bucket, lambda_package_s3_key and lambda_package_source_hash must be provided together."
+    }
+  }
 }
 
 resource "aws_lambda_function" "latest_projection" {
   function_name    = local.projection_lambda_name
-  filename         = data.archive_file.aws_serving_api.output_path
-  source_code_hash = data.archive_file.aws_serving_api.output_base64sha256
+  filename         = local.lambda_uses_s3_package ? null : data.archive_file.aws_serving_api[0].output_path
+  s3_bucket        = local.lambda_uses_s3_package ? var.lambda_package_s3_bucket : null
+  s3_key           = local.lambda_uses_s3_package ? var.lambda_package_s3_key : null
+  source_code_hash = local.lambda_uses_s3_package ? var.lambda_package_source_hash : data.archive_file.aws_serving_api[0].output_base64sha256
   handler          = "projection_handler.lambda_handler"
   runtime          = var.lambda_runtime
   role             = aws_iam_role.latest_projection.arn
@@ -138,4 +159,11 @@ resource "aws_lambda_function" "latest_projection" {
     aws_cloudwatch_log_group.projection_lambda,
     aws_iam_role_policy_attachment.latest_projection,
   ]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.lambda_package_s3_inputs) == 0 || local.lambda_uses_s3_package
+      error_message = "lambda_package_s3_bucket, lambda_package_s3_key and lambda_package_source_hash must be provided together."
+    }
+  }
 }

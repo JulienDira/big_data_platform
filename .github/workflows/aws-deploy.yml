@@ -1,0 +1,284 @@
+name: AWS Deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  ARTIFACT_VERSION: ${{ github.sha }}
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install lightweight test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r apps/binance-producer/requirements-aws.txt
+
+      - name: Run unit and static tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive infra/aws
+
+      - name: Terraform validate
+        run: |
+          set -euo pipefail
+          for stack in core batch serving; do
+            terraform -chdir="infra/aws/${stack}" init -backend=false -input=false
+            terraform -chdir="infra/aws/${stack}" validate
+          done
+
+      - name: Static deployment guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          if rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"; then
+            exit 1
+          fi
+
+          for token in \
+            "AWS_ACCESS_KEY""_ID" \
+            "AWS_SECRET_ACCESS""_KEY" \
+            "aws-access-key""-id" \
+            "aws-secret-access""-key"; do
+            if rg -n "${token}" .github/workflows; then
+              exit 1
+            fi
+          done
+
+          for token in \
+            "start-job""-run" \
+            "update-service --desired""-count" \
+            "put""-record" \
+            "put""-records" \
+            "streamlit ""deploy"; do
+            if rg -n "${token}" .github/workflows; then
+              exit 1
+            fi
+          done
+
+  publish-artifacts:
+    name: Publish Artifacts
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name != 'pull_request'
+    environment: dev
+
+    outputs:
+      ecr_repository_url: ${{ steps.core.outputs.ecr_repository_url }}
+      kinesis_stream_name: ${{ steps.core.outputs.kinesis_stream_name }}
+      kinesis_stream_arn: ${{ steps.core.outputs.kinesis_stream_arn }}
+      lambda_package_key: ${{ steps.package.outputs.lambda_package_key }}
+      lambda_package_source_hash: ${{ steps.package.outputs.lambda_package_source_hash }}
+
+    env:
+      AWS_ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      FARGATE_SUBNET_IDS: ${{ vars.FARGATE_SUBNET_IDS }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
+      TF_STATE_PREFIX: big-data-platform/dev
+      TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
+      VPC_ID: ${{ vars.VPC_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false
+
+      - name: Apply core stack with producer stopped
+        id: core
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/aws/core init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/core.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}"
+
+          terraform -chdir=infra/aws/core apply -auto-approve -input=false \
+            -var="aws_region=${AWS_REGION}" \
+            -var="producer_image_tag=${ARTIFACT_VERSION}" \
+            -var="ecs_service_desired_count=0" \
+            -var="vpc_id=${VPC_ID}" \
+            -var="fargate_subnet_ids=${FARGATE_SUBNET_IDS}"
+
+          echo "ecr_repository_url=$(terraform -chdir=infra/aws/core output -raw ecr_repository_url)" >> "${GITHUB_OUTPUT}"
+          echo "kinesis_stream_name=$(terraform -chdir=infra/aws/core output -raw kinesis_stream_name)" >> "${GITHUB_OUTPUT}"
+          echo "kinesis_stream_arn=$(terraform -chdir=infra/aws/core output -raw kinesis_stream_arn)" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push producer image
+        shell: bash
+        run: |
+          set -euo pipefail
+          ECR_REGISTRY="${{ steps.core.outputs.ecr_repository_url }}"
+          ECR_REGISTRY="${ECR_REGISTRY%%/*}"
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+          docker build \
+            --build-arg INSTALL_AWS_DEPS=true \
+            -t "${{ steps.core.outputs.ecr_repository_url }}:${ARTIFACT_VERSION}" \
+            -f apps/binance-producer/Dockerfile .
+          docker push "${{ steps.core.outputs.ecr_repository_url }}:${ARTIFACT_VERSION}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Package Glue and Lambda artifacts
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python infra/scripts/package-aws-artifacts.py --output-dir build/aws-artifacts
+          LAMBDA_PACKAGE_KEY="artifacts/lambda/${ARTIFACT_VERSION}/aws-serving-api.zip"
+          LAMBDA_SOURCE_HASH="$(cat build/aws-artifacts/lambda/aws-serving-api.zip.base64sha256)"
+          echo "lambda_package_key=${LAMBDA_PACKAGE_KEY}" >> "${GITHUB_OUTPUT}"
+          echo "lambda_package_source_hash=${LAMBDA_SOURCE_HASH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload immutable S3 artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws s3 cp build/aws-artifacts/glue \
+            "s3://${AWS_ARTIFACT_BUCKET}/artifacts/glue/${ARTIFACT_VERSION}/" \
+            --recursive
+          aws s3 cp build/aws-artifacts/lambda/aws-serving-api.zip \
+            "s3://${AWS_ARTIFACT_BUCKET}/${{ steps.package.outputs.lambda_package_key }}"
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: publish-artifacts
+    if: github.event_name != 'pull_request'
+    environment: dev
+
+    env:
+      ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+      API_CORS_ALLOWED_ORIGINS: ${{ vars.API_CORS_ALLOWED_ORIGINS }}
+      AWS_ARTIFACT_BUCKET: ${{ vars.AWS_ARTIFACT_BUCKET }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      STREAMLIT_CALLBACK_URLS: ${{ vars.STREAMLIT_CALLBACK_URLS }}
+      STREAMLIT_LOGOUT_URLS: ${{ vars.STREAMLIT_LOGOUT_URLS }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
+      TF_STATE_PREFIX: big-data-platform/dev
+      TF_STATE_REGION: ${{ vars.TF_STATE_REGION }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false
+
+      - name: Apply batch stack from immutable Glue artifacts
+        id: batch
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/aws/batch init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/batch.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}"
+
+          terraform -chdir=infra/aws/batch apply -auto-approve -input=false \
+            -var="aws_region=${AWS_REGION}" \
+            -var="market_candles_stream_name=${{ needs.publish-artifacts.outputs.kinesis_stream_name }}" \
+            -var="market_candles_stream_arn=${{ needs.publish-artifacts.outputs.kinesis_stream_arn }}" \
+            -var="glue_artifact_bucket_name=${AWS_ARTIFACT_BUCKET}" \
+            -var="glue_artifact_version=${ARTIFACT_VERSION}" \
+            -var="upload_glue_artifacts_from_workspace=false"
+
+          echo "lake_bucket_name=$(terraform -chdir=infra/aws/batch output -raw lake_bucket_name)" >> "${GITHUB_OUTPUT}"
+          echo "athena_results_bucket_name=$(terraform -chdir=infra/aws/batch output -raw athena_results_bucket_name)" >> "${GITHUB_OUTPUT}"
+          echo "athena_workgroup_name=$(terraform -chdir=infra/aws/batch output -raw athena_workgroup_name)" >> "${GITHUB_OUTPUT}"
+          echo "athena_output_location=$(terraform -chdir=infra/aws/batch output -raw athena_output_location)" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply serving stack from immutable Lambda package
+        shell: bash
+        run: |
+          set -euo pipefail
+          alert_args=()
+          if [ -n "${ALERT_EMAIL}" ]; then
+            alert_args=(-var="alert_email=${ALERT_EMAIL}")
+          fi
+
+          terraform -chdir=infra/aws/serving init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/serving.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}"
+
+          terraform -chdir=infra/aws/serving apply -auto-approve -input=false \
+            -var="aws_region=${AWS_REGION}" \
+            -var="lake_bucket_name=${{ steps.batch.outputs.lake_bucket_name }}" \
+            -var="athena_results_bucket_name=${{ steps.batch.outputs.athena_results_bucket_name }}" \
+            -var="athena_workgroup_name=${{ steps.batch.outputs.athena_workgroup_name }}" \
+            -var="athena_output_location=${{ steps.batch.outputs.athena_output_location }}" \
+            -var="lambda_package_s3_bucket=${AWS_ARTIFACT_BUCKET}" \
+            -var="lambda_package_s3_key=${{ needs.publish-artifacts.outputs.lambda_package_key }}" \
+            -var="lambda_package_source_hash=${{ needs.publish-artifacts.outputs.lambda_package_source_hash }}" \
+            -var="projection_schedule_enabled=false" \
+            -var="streamlit_callback_urls=${STREAMLIT_CALLBACK_URLS}" \
+            -var="streamlit_logout_urls=${STREAMLIT_LOGOUT_URLS}" \
+            -var="api_cors_allowed_origins=${API_CORS_ALLOWED_ORIGINS}" \
+            -var="market_candles_stream_name=${{ needs.publish-artifacts.outputs.kinesis_stream_name }}" \
+            "${alert_args[@]}"
+
+      - name: Print deployment preparation outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/aws/core output
+          terraform -chdir=infra/aws/batch output
+          terraform -chdir=infra/aws/serving output

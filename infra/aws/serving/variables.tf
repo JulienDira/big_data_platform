@@ -120,6 +120,24 @@ variable "lambda_memory_mb" {
   default     = 256
 }
 
+variable "lambda_package_s3_bucket" {
+  description = "Optional S3 bucket containing the CI-published Lambda zip package. Leave null for local archive_file packaging."
+  type        = string
+  default     = null
+}
+
+variable "lambda_package_s3_key" {
+  description = "Optional S3 key for the CI-published Lambda zip package. Leave null for local archive_file packaging."
+  type        = string
+  default     = null
+}
+
+variable "lambda_package_source_hash" {
+  description = "Optional base64-encoded SHA-256 hash for the CI-published Lambda zip package."
+  type        = string
+  default     = null
+}
+
 variable "cloudwatch_log_retention_days" {
   description = "Retention period for serving/API CloudWatch logs."
   type        = number

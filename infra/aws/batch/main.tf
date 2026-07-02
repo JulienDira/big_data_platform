@@ -21,6 +21,8 @@ locals {
   trading_gold_dataset_prefix = trim(var.trading_gold_dataset_prefix, "/")
   glue_artifacts_prefix       = trim(var.glue_artifacts_prefix, "/")
   glue_artifact_version       = trim(var.glue_artifact_version, "/")
+  glue_artifact_bucket_name   = coalesce(var.glue_artifact_bucket_name, aws_s3_bucket.lake.bucket)
+  glue_artifact_bucket_arn    = "arn:${data.aws_partition.current.partition}:s3:::${local.glue_artifact_bucket_name}"
   glue_artifact_key_prefix    = local.glue_artifact_version == "" ? local.glue_artifacts_prefix : "${local.glue_artifacts_prefix}/${local.glue_artifact_version}"
   athena_output_prefix        = trim(var.athena_output_prefix, "/")
   raw_checkpoint_prefix       = trim(var.raw_checkpoint_prefix, "/")
@@ -42,13 +44,13 @@ locals {
   jobs_utils_key                = "${local.glue_artifact_key_prefix}/python/jobs-utils.zip"
   serving_registry_key          = "${local.glue_artifact_key_prefix}/python/serving-registry.zip"
   contract_key                  = "${local.glue_artifact_key_prefix}/contracts/market-candle-v1.avsc"
-  raw_script_s3_uri             = "s3://${aws_s3_bucket.lake.bucket}/${local.raw_script_key}"
-  bronze_script_s3_uri          = "s3://${aws_s3_bucket.lake.bucket}/${local.bronze_script_key}"
-  silver_script_s3_uri          = "s3://${aws_s3_bucket.lake.bucket}/${local.silver_script_key}"
-  glue_script_s3_uri            = "s3://${aws_s3_bucket.lake.bucket}/${local.glue_script_key}"
-  jobs_utils_s3_uri             = "s3://${aws_s3_bucket.lake.bucket}/${local.jobs_utils_key}"
-  serving_registry_s3_uri       = "s3://${aws_s3_bucket.lake.bucket}/${local.serving_registry_key}"
-  contract_s3_uri               = "s3://${aws_s3_bucket.lake.bucket}/${local.contract_key}"
+  raw_script_s3_uri             = "s3://${local.glue_artifact_bucket_name}/${local.raw_script_key}"
+  bronze_script_s3_uri          = "s3://${local.glue_artifact_bucket_name}/${local.bronze_script_key}"
+  silver_script_s3_uri          = "s3://${local.glue_artifact_bucket_name}/${local.silver_script_key}"
+  glue_script_s3_uri            = "s3://${local.glue_artifact_bucket_name}/${local.glue_script_key}"
+  jobs_utils_s3_uri             = "s3://${local.glue_artifact_bucket_name}/${local.jobs_utils_key}"
+  serving_registry_s3_uri       = "s3://${local.glue_artifact_bucket_name}/${local.serving_registry_key}"
+  contract_s3_uri               = "s3://${local.glue_artifact_bucket_name}/${local.contract_key}"
   raw_glue_job_name             = "${local.name_prefix}-raw-market-candles-streaming"
   bronze_glue_job_name          = "${local.name_prefix}-bronze-market-candles-batch"
   silver_glue_job_name          = "${local.name_prefix}-silver-market-candles-batch"
@@ -63,7 +65,7 @@ locals {
   ])
   sql_file_s3_uris = [
     for file_name in sort(tolist(local.sql_files)) :
-    "s3://${aws_s3_bucket.lake.bucket}/${local.glue_artifact_key_prefix}/sql/${file_name}"
+    "s3://${local.glue_artifact_bucket_name}/${local.glue_artifact_key_prefix}/sql/${file_name}"
   ]
 }
 
@@ -158,12 +160,16 @@ resource "aws_s3_bucket_lifecycle_configuration" "athena_results" {
 }
 
 data "archive_file" "jobs_utils" {
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
   type        = "zip"
   source_dir  = "${local.repo_root}/jobs/utils"
   output_path = "${path.module}/.terraform/jobs-utils.zip"
 }
 
 data "archive_file" "serving_registry" {
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
   type        = "zip"
   output_path = "${path.module}/.terraform/serving-registry.zip"
 
@@ -174,7 +180,9 @@ data "archive_file" "serving_registry" {
 }
 
 resource "aws_s3_object" "glue_script" {
-  bucket       = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket       = local.glue_artifact_bucket_name
   key          = local.glue_script_key
   source       = "${local.repo_root}/jobs/gold-indicators/aws.py"
   etag         = filemd5("${local.repo_root}/jobs/gold-indicators/aws.py")
@@ -182,7 +190,9 @@ resource "aws_s3_object" "glue_script" {
 }
 
 resource "aws_s3_object" "raw_script" {
-  bucket       = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket       = local.glue_artifact_bucket_name
   key          = local.raw_script_key
   source       = "${local.repo_root}/jobs/raw-consumer/aws.py"
   etag         = filemd5("${local.repo_root}/jobs/raw-consumer/aws.py")
@@ -190,7 +200,9 @@ resource "aws_s3_object" "raw_script" {
 }
 
 resource "aws_s3_object" "bronze_script" {
-  bucket       = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket       = local.glue_artifact_bucket_name
   key          = local.bronze_script_key
   source       = "${local.repo_root}/jobs/bronze-ingestion/aws.py"
   etag         = filemd5("${local.repo_root}/jobs/bronze-ingestion/aws.py")
@@ -198,7 +210,9 @@ resource "aws_s3_object" "bronze_script" {
 }
 
 resource "aws_s3_object" "silver_script" {
-  bucket       = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket       = local.glue_artifact_bucket_name
   key          = local.silver_script_key
   source       = "${local.repo_root}/jobs/silver-transformation/aws.py"
   etag         = filemd5("${local.repo_root}/jobs/silver-transformation/aws.py")
@@ -206,7 +220,9 @@ resource "aws_s3_object" "silver_script" {
 }
 
 resource "aws_s3_object" "market_candle_contract" {
-  bucket       = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket       = local.glue_artifact_bucket_name
   key          = local.contract_key
   source       = "${local.repo_root}/contracts/market-candle/v1.avsc"
   etag         = filemd5("${local.repo_root}/contracts/market-candle/v1.avsc")
@@ -214,23 +230,27 @@ resource "aws_s3_object" "market_candle_contract" {
 }
 
 resource "aws_s3_object" "jobs_utils" {
-  bucket      = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket      = local.glue_artifact_bucket_name
   key         = local.jobs_utils_key
-  source      = data.archive_file.jobs_utils.output_path
-  source_hash = data.archive_file.jobs_utils.output_base64sha256
+  source      = data.archive_file.jobs_utils[0].output_path
+  source_hash = data.archive_file.jobs_utils[0].output_base64sha256
 }
 
 resource "aws_s3_object" "serving_registry" {
-  bucket      = aws_s3_bucket.lake.id
+  count = var.upload_glue_artifacts_from_workspace ? 1 : 0
+
+  bucket      = local.glue_artifact_bucket_name
   key         = local.serving_registry_key
-  source      = data.archive_file.serving_registry.output_path
-  source_hash = data.archive_file.serving_registry.output_base64sha256
+  source      = data.archive_file.serving_registry[0].output_path
+  source_hash = data.archive_file.serving_registry[0].output_base64sha256
 }
 
 resource "aws_s3_object" "serving_sql" {
-  for_each = local.sql_files
+  for_each = var.upload_glue_artifacts_from_workspace ? local.sql_files : toset([])
 
-  bucket       = aws_s3_bucket.lake.id
+  bucket       = local.glue_artifact_bucket_name
   key          = "${local.glue_artifact_key_prefix}/sql/${each.value}"
   source       = "${local.repo_root}/jobs/serving-datamart/sql/${each.value}"
   etag         = filemd5("${local.repo_root}/jobs/serving-datamart/sql/${each.value}")

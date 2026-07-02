@@ -119,9 +119,9 @@ variable "ecs_cluster_name" {
 }
 
 variable "ecs_service_desired_count" {
-  description = "Number of Binance producer tasks."
+  description = "Number of Binance producer tasks. Keep 0 before the runtime validation phase starts the producer intentionally."
   type        = number
-  default     = 1
+  default     = 0
 }
 
 variable "producer_task_cpu" {

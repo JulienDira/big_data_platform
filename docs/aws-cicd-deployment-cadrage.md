@@ -19,6 +19,15 @@ controlled dev/POC environment.
 This cadrage does not implement the workflow and does not run AWS runtime
 validation.
 
+Implementation status on 2026-07-02:
+
+- `.github/workflows/aws-deploy.yml` implements the target GitHub Actions path;
+- `infra/scripts/package-aws-artifacts.py` packages Glue and Lambda artifacts;
+- Terraform modules now declare S3 backend blocks for CI and keep
+  `terraform init -backend=false` as the local static validation path;
+- runtime remains disabled by default: ECS desired count is `0`, Glue jobs are
+  not started by the workflow, and the projection schedule stays disabled.
+
 ## References and standards used
 
 - GitHub recommends AWS OIDC for GitHub Actions so workflows do not need
@@ -84,14 +93,17 @@ The project needs one explicit bootstrap before push-based deployment can work:
    - Terraform state lock table or equivalent locking mechanism;
    - GitHub OIDC IAM provider if it is not already present;
    - GitHub deploy IAM role scoped to this repository/environment;
-   - optional artifact bucket if it is intentionally separate from the lake
-     bucket.
+   - artifact bucket used by CI for Glue and Lambda packages.
 2. Configure GitHub Environment `dev` with variables:
    - `AWS_REGION`;
    - `AWS_DEPLOY_ROLE_ARN`;
-   - Terraform backend bucket/key/region/table values;
-   - VPC/subnet values required by `infra/aws/core`;
-   - Cognito callback/logout URLs and API CORS origins;
+   - `AWS_ARTIFACT_BUCKET`;
+   - `TF_STATE_BUCKET`, `TF_STATE_LOCK_TABLE` and `TF_STATE_REGION`;
+   - `VPC_ID`;
+   - `FARGATE_SUBNET_IDS` as a Terraform list expression, for example
+     `["subnet-a","subnet-b"]`;
+   - `STREAMLIT_CALLBACK_URLS`, `STREAMLIT_LOGOUT_URLS` and
+     `API_CORS_ALLOWED_ORIGINS` as Terraform list expressions;
    - optional `ALERT_EMAIL`.
 3. Keep secrets minimal. Prefer variables for non-sensitive names and OIDC for
    AWS access.
@@ -111,6 +123,8 @@ Recommended jobs:
      SDK access.
 2. `publish-artifacts`
    - authenticate to AWS through OIDC;
+   - apply `infra/aws/core` first with `ecs_service_desired_count=0` so the
+     Kinesis stream, ECR repository and stopped ECS service exist;
    - build producer Docker image with `INSTALL_AWS_DEPS=true`;
    - push the image to ECR with tag `${github.sha}`;
    - package Glue scripts, `jobs-utils.zip`, `serving-registry.zip`, SQL and
@@ -122,8 +136,6 @@ Recommended jobs:
    - expose artifact keys and hashes as job outputs.
 3. `terraform-apply`
    - initialize Terraform with backend config and `-input=false`;
-   - apply `infra/aws/core`, passing `producer_image_tag=${github.sha}` and
-     keeping `ecs_service_desired_count=0` by default before runtime;
    - apply `infra/aws/batch`, passing `glue_artifact_version=${github.sha}` and
      consuming CI-published Glue artifact keys;
    - apply `infra/aws/serving`, passing the Lambda S3 package key/hash and

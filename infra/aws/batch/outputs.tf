@@ -67,6 +67,11 @@ output "glue_artifact_key_prefix" {
   value       = local.glue_artifact_key_prefix
 }
 
+output "glue_artifact_bucket_name" {
+  description = "S3 bucket containing the Glue script, Python zips and SQL files."
+  value       = local.glue_artifact_bucket_name
+}
+
 output "glue_cloudwatch_log_group_name" {
   description = "CloudWatch log group used by the Glue Spark batch job."
   value       = aws_cloudwatch_log_group.glue_jobs.name

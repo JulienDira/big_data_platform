@@ -63,6 +63,7 @@ data "aws_iam_policy_document" "glue_raw_streaming" {
     ]
     resources = [
       aws_s3_bucket.lake.arn,
+      local.glue_artifact_bucket_arn,
     ]
 
     condition {
@@ -85,7 +86,7 @@ data "aws_iam_policy_document" "glue_raw_streaming" {
       "s3:GetObject",
     ]
     resources = [
-      "${aws_s3_bucket.lake.arn}/${local.glue_artifacts_prefix}/*",
+      "${local.glue_artifact_bucket_arn}/${local.glue_artifacts_prefix}/*",
     ]
   }
 
@@ -164,6 +165,7 @@ data "aws_iam_policy_document" "glue_lake_transform" {
     ]
     resources = [
       aws_s3_bucket.lake.arn,
+      local.glue_artifact_bucket_arn,
     ]
 
     condition {
@@ -192,7 +194,7 @@ data "aws_iam_policy_document" "glue_lake_transform" {
     resources = [
       "${aws_s3_bucket.lake.arn}/${local.raw_dataset_prefix}/*",
       "${aws_s3_bucket.lake.arn}/${local.bronze_dataset_prefix}/*",
-      "${aws_s3_bucket.lake.arn}/${local.glue_artifacts_prefix}/*",
+      "${local.glue_artifact_bucket_arn}/${local.glue_artifacts_prefix}/*",
     ]
   }
 
@@ -284,6 +286,7 @@ data "aws_iam_policy_document" "glue_batch" {
     ]
     resources = [
       aws_s3_bucket.lake.arn,
+      local.glue_artifact_bucket_arn,
     ]
   }
 
@@ -319,7 +322,7 @@ data "aws_iam_policy_document" "glue_batch" {
     ]
     resources = [
       "${aws_s3_bucket.lake.arn}/${local.silver_dataset_prefix}/*",
-      "${aws_s3_bucket.lake.arn}/${local.glue_artifacts_prefix}/*",
+      "${local.glue_artifact_bucket_arn}/${local.glue_artifacts_prefix}/*",
     ]
   }
 

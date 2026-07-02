@@ -42,8 +42,9 @@ resource "aws_kinesis_stream" "market_candles" {
 }
 
 resource "aws_ecr_repository" "binance_producer" {
-  name         = local.ecr_repository_name
-  force_delete = var.ecr_force_delete
+  name                 = local.ecr_repository_name
+  force_delete         = var.ecr_force_delete
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
