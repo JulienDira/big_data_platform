@@ -17,7 +17,6 @@ locals {
   user_pool_name         = "${local.name_prefix}-users"
   cognito_domain_prefix  = coalesce(var.cognito_domain_prefix, "${local.name_prefix}-auth")
   latest_table_name      = coalesce(var.latest_metrics_table_name, "${local.name_prefix}-latest-metrics")
-  metric_namespace       = "${var.project_name}/Serving"
 
   athena_results_prefix     = trim(var.athena_results_prefix, "/")
   lake_bucket_arn           = "arn:${data.aws_partition.current.partition}:s3:::${var.lake_bucket_name}"
@@ -42,7 +41,6 @@ locals {
     ATHENA_QUERY_TIMEOUT_SECONDS = tostring(var.api_lambda_timeout_seconds - 5)
     ATHENA_WORKGROUP             = var.athena_workgroup_name
     AWS_REGION                   = var.aws_region
-    CLOUDWATCH_METRIC_NAMESPACE  = local.metric_namespace
     DYNAMODB_TABLE_NAME          = aws_dynamodb_table.latest_metrics.name
     HISTORY_DEFAULT_LIMIT        = tostring(var.history_default_limit)
     HISTORY_MAX_LIMIT            = tostring(var.history_max_limit)

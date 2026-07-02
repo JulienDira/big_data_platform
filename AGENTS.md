@@ -149,6 +149,12 @@ Layer responsibilities:
 - Cadrer DynamoDB latest metrics, API Gateway/Lambda, Streamlit/local
   dashboard support, CloudWatch alarms and AWS Budgets in a later phase before
   implementing them.
+- After the static AWS quality audit, cadrer and implement a simple automated
+  CI/CD and deployment preparation path before recommending global AWS runtime
+  validation.
+- The target AWS deployment path should use GitHub Actions with AWS OIDC,
+  immutable ECR/S3 artifacts and Terraform inputs. Do not rely on long-lived
+  AWS access keys in GitHub as the normal path.
 
 ## Validation Rules
 
@@ -175,8 +181,11 @@ Always distinguish:
 
 - unit/static validation;
 - Spark local validation;
+- static quality/conformance audit against repo rules and provider guidance;
 - true runtime validation on YARN/HDFS/Hive/PostgreSQL;
 - AWS runtime validation on Kinesis/ECS/S3 Raw-Bronze-Silver/Glue/Athena.
+- AWS CI/CD/deployment preparation, which may publish immutable artifacts and
+  apply dev/POC Terraform but still does not prove service runtime behavior.
 
 Do not claim end-to-end validation unless the actual runtime surfaces were
 checked.
@@ -184,6 +193,9 @@ checked.
 If AWS credentials or permissions are unavailable, record AWS checks as
 prepared or statically validated only. Do not make the next phase only a
 runtime-validation phase when the AWS target services still need to be built.
+After a broad AWS implementation phase, run a static quality/conformance audit
+and then the CI/CD/deployment preparation phase before global AWS runtime
+validation unless the user explicitly changes that order.
 
 ## Documentation Rules
 

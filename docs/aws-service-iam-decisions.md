@@ -27,7 +27,7 @@ Status values:
 | Medallion layers | Raw, Bronze, Silver, Gold, Serving | Fait on-prem, Prepare AWS core/lake/batch | On-prem chain is proven; AWS producer, Kinesis -> S3 Raw/Bronze/Silver and Gold batch paths are prepared statically. AWS runtime proof is missing. |
 | Daily volume reference | 263880 rows/day per main layer | Prepare | Captured as sizing context, not enforced by runtime tests yet. |
 | Budget | 50 EUR maximum for controlled POC | Prepare | `infra/aws/serving` declares an AWS Budget with 50%, 80% and 100% notification thresholds when an alert email is provided. AWS runtime proof is missing. |
-| Deployment | Terraform plus CI/CD | Prepare, CI/CD a developper | Terraform exists for batch and core producer resources; CI/CD still has to automate ECR image builds and versioned Glue artifacts. |
+| Deployment | Terraform plus CI/CD | Prepare, CI/CD cadre a developper | Terraform exists for core, batch and serving resources; `docs/aws-cicd-deployment-cadrage.md` frames GitHub Actions OIDC, immutable ECR/S3 artifacts, Lambda Zip/S3 packaging and Terraform inputs. CI/CD implementation is still missing. |
 
 ## Service decisions
 
@@ -87,6 +87,7 @@ scoped to the input/output prefixes they consume and produce.
 | Partition analytical datasets by date, symbol and interval | Prepare | Glue table projection uses `event_date`, `symbol`, `interval` where applicable. |
 | Use CloudWatch logs for Glue batch | Prepare | Log group and Glue continuous log arguments are declared. |
 | Apply least privilege IAM | Prepare | Glue batch policy is scoped to batch S3 prefixes, Glue Catalog and logs. |
+| Cadrer CI/CD and automated deployment before AWS runtime validation | Fait | `docs/aws-cicd-deployment-cadrage.md` defines GitHub Actions OIDC, immutable artifact publication, Terraform/CI separation and the Zip/S3 Lambda default. |
 | Validate AWS runtime on S3/Glue/Athena | Reporte | Blocked until AWS credentials and target account access are available. |
 | Configure AWS Budgets | Prepare | `infra/aws/serving` declares a 50 EUR monthly POC Budget with optional email notifications at 50%, 80% and 100%. AWS runtime proof is missing. |
 
@@ -99,9 +100,15 @@ the repo.
 
 The later restitution/API/observability scope is now statically implemented in
 `apps/aws-serving-api`, `apps/streamlit-dashboard` and `infra/aws/serving`.
-The next phase should be AWS runtime validation only when a real AWS account,
+The static quality, standards and conformance audit is complete. The next phase
+should implement the CI/CD and automated deployment preparation path framed in
+`docs/aws-cicd-deployment-cadrage.md`.
+
+AWS runtime validation should happen only after CI/CD publishes immutable
+producer, Glue and Lambda artifacts, Terraform consumes those versions, the
+dev/POC deployment preparation path is reproducible, and a real AWS account,
 credentials, callback URLs, alert email and deployment permissions are
-available. CI/CD hardening remains separate from runtime proof.
+available.
 
 Runtime validation in AWS should happen only after the selected AWS path has
 been framed and implemented: producer/Kinesis/ECS, Kinesis -> S3
@@ -116,8 +123,13 @@ validated until checked in a real AWS account.
 
 The on-premise Silver -> Gold -> Serving path is proven on YARN, HDFS/Hive,
 PostgreSQL and Spark History. The AWS path is currently prepared and statically
-validated only. Do not mark AWS runtime validation complete until:
+validated only. Before runtime validation, complete CI/CD artifact publication
+and automated deployment preparation. Do not mark AWS runtime validation
+complete until:
 
+- CI/CD publishes the producer image, Glue artifacts and Lambda package with an
+  immutable version.
+- Terraform consumes those immutable versions through explicit inputs.
 - Terraform plan/apply succeeds in the target AWS account.
 - The producer/ECS/Kinesis path is deployed and sends records.
 - Kinesis -> S3 Raw/Bronze/Silver ingestion is deployed and checked in AWS.

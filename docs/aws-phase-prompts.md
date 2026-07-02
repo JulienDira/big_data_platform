@@ -273,11 +273,236 @@ Out of scope:
 
 End of phase:
 - update docs/phase-handoff.md with exact validations and missing runtime proof;
-- if the selected AWS path is fully developed, prepare the runtime validation
-  phase prompt.
+- prepare the static quality and conformance audit prompt before any runtime
+  validation phase.
 ```
 
-## Optional phase 7 prompt - AWS runtime validation
+## Phase 7 prompt - Static quality, standards and conformance audit
+
+Run this after the AWS producer/lake/Gold/restitution/API/dashboard/
+observability implementation is present at least statically, and before any AWS
+runtime validation.
+
+```text
+Mission:
+Audit the static AWS implementation for code quality, architecture conformance,
+data engineering practices, software/API practices, DevOps/IaC practices and
+provider standards. Apply only minimal refactors when the audit finds concrete
+violations of the repo rules or obvious over-complexity.
+
+Context:
+The AWS path is implemented statically but not runtime-validated:
+- producer/ECS/Kinesis under apps/binance-producer and infra/aws/core;
+- Kinesis -> S3 Raw/Bronze/Silver under jobs/raw-consumer/aws.py,
+  jobs/bronze-ingestion/aws.py, jobs/silver-transformation/aws.py,
+  jobs/utils and infra/aws/batch;
+- Glue Gold and trading_gold restitution under jobs/gold-indicators/aws.py,
+  jobs/serving-datamart/sql and infra/aws/batch;
+- DynamoDB latest metrics, API Gateway/Lambda, Cognito, Streamlit Cloud wiring,
+  CloudWatch alarms and Budget under apps/aws-serving-api,
+  apps/streamlit-dashboard and infra/aws/serving.
+
+Before changes:
+- read AGENTS.md, cadrage.md, docs/phase-handoff.md, docs/phase-template.md,
+  docs/aws-service-iam-decisions.md, docs/aws-core-portability-cadrage.md,
+  docs/aws-lake-ingestion-cadrage.md and
+  docs/aws-serving-observability-cadrage.md;
+- read docs/aws-static-quality-audit.md as historical context, then refresh it
+  against the current repo state;
+- inspect git status, the actual AWS code, Terraform and tests;
+- do not revert existing modified or untracked files;
+- do not run terraform plan/apply, AWS CLI runtime checks or Streamlit deploy.
+
+Use current primary-source references:
+- AWS Well-Architected Data Analytics Lens:
+  https://docs.aws.amazon.com/wellarchitected/latest/analytics-lens/analytics-lens.html
+- AWS Glue best practices:
+  https://docs.aws.amazon.com/prescriptive-guidance/latest/serverless-etl-aws-glue/best-practices.html
+- AWS Lambda best practices:
+  https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html
+- API Gateway security best practices:
+  https://docs.aws.amazon.com/apigateway/latest/developerguide/security-best-practices.html
+- DynamoDB design best practices:
+  https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/best-practices.html
+- Terraform language style guide:
+  https://developer.hashicorp.com/terraform/language/style
+- Streamlit secrets management documentation:
+  https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management
+
+In scope:
+- verify one source of truth for contracts, paths, table names, partitions,
+  symbols, intervals, IAM boundaries and runtime parameters;
+- verify job/domain structure stays readable: one logical pipeline step per
+  folder, edge-specific aws.py/main.py entry points, shared reusable logic in
+  jobs/utils or a small domain helper, not monolithic files;
+- verify transformations stay pure and atomic: no SparkSession, S3, Glue,
+  DynamoDB, PostgreSQL, API or IAM details inside business transformations;
+- verify API/Lambda code is simple, read-only for API handlers, does not compute
+  EMA/MACD/RSI/Bollinger, does not write lake datasets, validates parameters,
+  returns stable JSON and separates projection writes from API reads;
+- verify Streamlit calls API Gateway only and uses Streamlit secrets/config,
+  with no AWS SDK or direct DynamoDB/Athena/S3/Glue access;
+- verify Terraform follows readable module boundaries, least privilege IAM,
+  typed/described variables, consistent naming, no needless variables, no RDS
+  or AWS PostgreSQL target, and no broad wildcard permissions unless justified;
+- verify data engineering choices: medallion boundaries, partitioning,
+  Parquet outputs, Glue Catalog/Athena role, rejected data handling,
+  idempotent/replayable batch behavior and explicit proof boundaries;
+- verify DevOps choices: artifact ownership, Docker/ECR/ECS separation,
+  Terraform vs CI/CD responsibilities, log retention, alarms, Budget and
+  secrets handling;
+- add or adjust static/unit tests only where they directly protect discovered
+  risks;
+- refactor only concrete issues found during the audit, keeping changes small,
+  domain-oriented and easier to read.
+
+Out of scope:
+- AWS runtime validation;
+- terraform plan/apply;
+- AWS CLI service checks;
+- Streamlit Cloud deployment;
+- broad rewrites, new frameworks, factories, base classes or generic plugin
+  systems;
+- changing business semantics unless a failing test or source-of-truth mismatch
+  proves the current behavior is wrong;
+- adding RDS/PostgreSQL AWS.
+
+Expected output:
+- a concise audit result, preferably in docs/aws-static-quality-audit.md or an
+  update to that file if it already exists;
+- any minimal refactors needed to restore atomicity, purity, readability or
+  source-of-truth discipline;
+- updated tests for changed behavior or newly protected constraints;
+- docs/phase-handoff.md updated with findings, changed files, validation
+  results, remaining risks and the next recommended phase.
+
+Validation:
+- powershell -ExecutionPolicy Bypass -File .\platform.ps1 test
+- terraform fmt -check -recursive infra/aws
+- terraform -chdir=infra/aws/core validate
+- terraform -chdir=infra/aws/batch validate
+- terraform -chdir=infra/aws/serving validate
+- rg scans proving no AWS RDS/PostgreSQL target and no direct Streamlit AWS SDK
+  access
+- rg scans proving Lambda/API handlers do not import Spark or indicator
+  calculation helpers
+- git diff --check
+
+End of phase:
+- if the implementation is conformant and static/local validation passes,
+  prepare the CI/CD and deployment preparation prompt as the next phase;
+- if major design issues remain, recommend one narrow remediation phase instead
+  of runtime validation.
+```
+
+## Phase 8 prompt - AWS CI/CD and artifact deployment implementation
+
+Run this after the static quality, standards and conformance audit. Do not run
+global AWS runtime validation yet.
+
+```text
+Mission:
+Implement the simplified AWS CI/CD and deployment preparation path defined in
+docs/aws-cicd-deployment-cadrage.md.
+
+Context:
+The AWS implementation is prepared statically, but deployment is still too
+manual: producer image build/push, Glue artifacts and Lambda package publication
+must become reproducible and automated before global runtime validation.
+
+Before changes:
+- read AGENTS.md, cadrage.md, docs/phase-handoff.md, docs/phase-template.md,
+  docs/aws-service-iam-decisions.md, docs/aws-phase-prompts.md,
+  docs/aws-static-quality-audit.md and
+  docs/aws-cicd-deployment-cadrage.md;
+- inspect git status, .github, infra/aws/core, infra/aws/batch,
+  infra/aws/serving, apps/binance-producer, apps/aws-serving-api, jobs and
+  tests;
+- do not revert existing modified or untracked files;
+- do not run global AWS runtime validation.
+
+In scope:
+- add a GitHub Actions workflow on push to main and pull_request validation;
+- use AWS OIDC with AWS_DEPLOY_ROLE_ARN, not long-lived AWS access keys;
+- add or document the bootstrap path for Terraform remote state, locking and
+  the GitHub deploy role;
+- publish the producer Docker image to ECR with an immutable commit SHA tag;
+- publish Glue scripts, jobs-utils.zip, serving-registry.zip, SQL and Avro
+  contract under a commit-SHA artifact version;
+- publish the Lambda API/projection zip to S3 and pass its key/hash to
+  Terraform;
+- adjust Terraform inputs so CI consumes immutable artifact references instead
+  of building zips from the working tree in CI mode;
+- keep runtime disabled by default: ECS desired count 0, no Glue job starts,
+  projection schedule disabled unless explicitly enabled later;
+- update docs/phase-handoff.md with exact validation results and missing proof.
+
+Out of scope:
+- global AWS runtime validation;
+- starting ECS/Kinesis runtime;
+- running Glue jobs;
+- Streamlit Cloud deployment;
+- adding RDS/PostgreSQL AWS;
+- using Lambda ECR images by default.
+
+Validation:
+- run repo static/unit tests if available in the environment;
+- run terraform fmt and terraform validate for changed AWS modules;
+- run rg scans for forbidden AWS PostgreSQL/RDS and forbidden runtime commands;
+- run git diff --check;
+- do not run terraform apply unless the phase explicitly has bootstrap and
+  deploy permissions and is implementing the dev/POC automation path.
+
+End of phase:
+- update docs/phase-handoff.md with the workflow, Terraform/artifact changes,
+  validation results, missing runtime proof and the next recommended phase;
+- prepare the AWS deployment preparation prompt, not global runtime validation.
+```
+
+## Phase 9 prompt - AWS deployment preparation
+
+Run this after Phase 8 has implemented CI/CD and immutable artifact publication.
+This phase may apply the prepared dev/POC infrastructure through the automated
+path, but it still must not execute the full data runtime.
+
+```text
+Mission:
+Use the implemented CI/CD path to prepare AWS infrastructure deployment for the
+dev/POC environment without claiming global runtime validation.
+
+Prerequisites:
+- GitHub OIDC role and Terraform backend/locking bootstrap are configured.
+- GitHub Environment variables are present for AWS region, deploy role, VPC,
+  subnets, callbacks, CORS origins and optional alert email.
+- CI/CD publishes producer, Glue and Lambda artifacts with immutable commit SHA
+  versions.
+
+In scope:
+- run the automated dev/POC deployment path from GitHub Actions;
+- verify Terraform outputs for core, batch and serving modules;
+- verify artifact references in task definitions, Glue jobs and Lambda
+  functions point to the intended immutable version;
+- keep runtime disabled by default: ECS producer desired count 0, no Glue job
+  runs, projection schedule disabled unless explicitly enabled, no Streamlit
+  Cloud deploy;
+- document exact outputs and proof gaps in docs/phase-handoff.md.
+
+Out of scope:
+- starting the producer runtime;
+- sending Kinesis records;
+- running Glue Raw/Bronze/Silver/Gold jobs;
+- Athena data validation;
+- API/Cognito/Streamlit runtime validation;
+- Streamlit Cloud deployment;
+- adding new AWS features.
+
+End of phase:
+- if deployment preparation is reproducible and no critical gap remains,
+  prepare the optional global AWS runtime validation prompt;
+- otherwise recommend one narrow CI/CD/deployment remediation phase.
+```
+
+## Optional phase 10 prompt - AWS runtime validation
 
 ```text
 Mission:
@@ -287,7 +512,10 @@ Prerequisite:
 AWS credentials and permissions are available.
 The selected AWS path has already been framed and implemented: producer/ECS/
 Kinesis, Kinesis -> S3 Raw/Bronze/Silver, Glue Gold/trading_gold, and any later
-API/dashboard/observability surfaces included in the scope.
+API/dashboard/observability surfaces included in the scope. The static quality,
+standards and conformance audit phase has been completed. The CI/CD and
+deployment preparation phases have published immutable artifacts and prepared
+the dev/POC infrastructure reproducibly.
 
 In scope:
 - terraform plan/apply for implemented modules;

@@ -66,6 +66,7 @@ class ContractTest(unittest.TestCase):
         self.assertIn("aws_apigatewayv2_api", terraform_sources)
         self.assertIn("aws_cognito_user_pool", terraform_sources)
         self.assertIn("aws_budgets_budget", terraform_sources)
+        self.assertNotIn("cloudwatch:PutMetricData", terraform_sources)
 
     def test_gold_and_serving_entrypoints_use_common_helpers(self):
         gold_main = (ROOT / "jobs/gold-indicators/main.py").read_text(encoding="utf-8")

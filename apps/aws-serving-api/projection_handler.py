@@ -5,13 +5,15 @@ import time
 from decimal import Decimal
 from typing import Any
 
-from api_handler import (
+from serving_common import (
+    aws_client,
     get_athena_page,
     required_env,
     start_athena_query,
+    to_decimal,
+    to_dynamodb_attribute,
     wait_for_athena_query,
 )
-from serving_common import to_decimal, to_dynamodb_attribute
 
 
 LATEST_FIELDS = (
@@ -114,9 +116,3 @@ def latest_metric_row_to_item(
     item = {field: to_dynamodb_attribute(row.get(field)) for field in LATEST_FIELDS}
     item["expires_at_epoch"] = to_dynamodb_attribute(now_epoch + ttl_days * 24 * 60 * 60)
     return item
-
-
-def aws_client(service_name: str) -> Any:
-    import boto3
-
-    return boto3.client(service_name, region_name=os.getenv("AWS_REGION"))

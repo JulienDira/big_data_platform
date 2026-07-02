@@ -97,18 +97,6 @@ data "aws_iam_policy_document" "api_lambda" {
     ]
     resources = ["${aws_cloudwatch_log_group.api_lambda.arn}:*"]
   }
-
-  statement {
-    sid       = "PublishServingMetrics"
-    actions   = ["cloudwatch:PutMetricData"]
-    resources = ["*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "cloudwatch:namespace"
-      values   = [local.metric_namespace]
-    }
-  }
 }
 
 resource "aws_iam_policy" "api_lambda" {
@@ -198,18 +186,6 @@ data "aws_iam_policy_document" "latest_projection" {
       "logs:PutLogEvents",
     ]
     resources = ["${aws_cloudwatch_log_group.projection_lambda.arn}:*"]
-  }
-
-  statement {
-    sid       = "PublishProjectionMetrics"
-    actions   = ["cloudwatch:PutMetricData"]
-    resources = ["*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "cloudwatch:namespace"
-      values   = [local.metric_namespace]
-    }
   }
 }
 

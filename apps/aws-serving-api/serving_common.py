@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import base64
+from functools import lru_cache
 import json
+import os
 import re
+import time
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -75,6 +78,20 @@ class ServiceFailure(ApiError):
 
 class ServiceTimeout(ApiError):
     status_code = 504
+
+
+def required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise ServiceFailure(f"Missing required environment variable: {name}")
+    return value
+
+
+@lru_cache(maxsize=None)
+def aws_client(service_name: str) -> Any:
+    import boto3
+
+    return boto3.client(service_name, region_name=os.getenv("AWS_REGION"))
 
 
 def csv_values(value: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -231,3 +248,48 @@ def json_response(status_code: int, body: dict[str, Any]) -> dict[str, Any]:
         "headers": {"content-type": "application/json"},
         "body": json.dumps(body, separators=(",", ":"), default=str),
     }
+
+
+def start_athena_query(athena: Any, query: str) -> str:
+    result = athena.start_query_execution(
+        QueryString=query,
+        QueryExecutionContext={"Database": required_env("ATHENA_DATABASE")},
+        WorkGroup=required_env("ATHENA_WORKGROUP"),
+        ResultConfiguration={"OutputLocation": required_env("ATHENA_OUTPUT_LOCATION")},
+    )
+    return result["QueryExecutionId"]
+
+
+def wait_for_athena_query(athena: Any, query_execution_id: str) -> None:
+    timeout_seconds = float(os.getenv("ATHENA_QUERY_TIMEOUT_SECONDS", "10"))
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        result = athena.get_query_execution(QueryExecutionId=query_execution_id)
+        status = result["QueryExecution"]["Status"]["State"]
+        if status == "SUCCEEDED":
+            return
+        if status in {"FAILED", "CANCELLED"}:
+            reason = result["QueryExecution"]["Status"].get("StateChangeReason", status)
+            raise ServiceFailure(f"Athena query {status.lower()}: {reason}")
+        time.sleep(0.25)
+
+    try:
+        athena.stop_query_execution(QueryExecutionId=query_execution_id)
+    except Exception:
+        pass
+    raise ServiceTimeout("Athena query timed out")
+
+
+def get_athena_page(
+    athena: Any,
+    query_execution_id: str,
+    limit: int,
+    next_token: str | None = None,
+) -> dict[str, Any]:
+    args: dict[str, Any] = {
+        "QueryExecutionId": query_execution_id,
+        "MaxResults": min(limit if next_token else limit + 1, 1000),
+    }
+    if next_token:
+        args["NextToken"] = next_token
+    return athena.get_query_results(**args)

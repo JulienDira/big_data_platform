@@ -134,16 +134,15 @@ metrics temps reel, pas comme remplacement de la table historisee Athena.
 ## 5. Ordre d'execution recommande
 
 Les premieres phases ont deja consolide le socle on-premise, les
-transformations communes, l'entry point AWS batch et le Terraform minimal
-S3/Glue/Athena.
+transformations communes et la cible AWS statique: producer/Kinesis/ECS,
+Kinesis -> S3 Raw/Bronze/Silver, Glue Gold, `trading_gold` S3/Athena et la
+surface API/observabilite.
 
-Comme aucun environnement AWS exploitable n'est disponible maintenant, la
-prochaine phase ne doit pas etre une simple validation runtime AWS. Meme si un
-compte AWS devient disponible, la validation runtime globale doit attendre que
-le chemin AWS complet soit cadre et developpe. Le maillon encore manquant est
-l'ingestion lake Kinesis -> S3 Raw/Bronze/Silver. Il doit etre cadre puis
-implemente avant les surfaces applicatives et avant une validation runtime AWS
-de bout en bout.
+La validation runtime AWS globale ne doit pas suivre directement l'audit
+statique. Avant de lancer des services AWS pour preuve de bout en bout, il faut
+d'abord cadrer puis implementer un systeme CI/CD et deploiement automatise
+simple: publication d'images ECR, artefacts Glue, package Lambda, variables
+Terraform et separation claire entre Terraform et CI/CD.
 
 Ordre recommande:
 
@@ -192,11 +191,44 @@ Ordre recommande:
      comme lecteur direct de S3, Athena ou DynamoDB;
    - valider statiquement/localement et ne declarer le runtime AWS prouve
      qu'apres verification dans un vrai compte AWS.
-7. Phase de validation runtime AWS globale:
+7. Phase d'audit statique qualite/conformite:
+   - verifier le code et Terraform sans runtime AWS;
+   - confronter l'implementation aux regles du repo, aux bonnes pratiques data
+     engineering, software/API, DevOps/IaC et aux recommandations fournisseurs
+     officielles;
+   - verifier purete, atomicite, lisibilite, source de verite unique et
+     absence d'over-engineering;
+   - refactorer seulement les ecarts concrets, avec des changements minimaux
+     et des tests statiques/locaux;
+   - documenter les ecarts restants avant toute validation runtime.
+8. Phase de cadrage CI/CD et deploiement automatise:
+   - definir le workflow GitHub Actions cible sur `push` vers `main`;
+   - utiliser AWS OIDC, pas de cles AWS longues durees dans GitHub comme chemin
+     normal;
+   - cadrer le bootstrap unique: backend Terraform distant, verrouillage,
+     role GitHub OIDC et variables GitHub Environment;
+   - comparer Zip/S3 et ECR pour Lambda et retenir Zip/S3 par defaut pour
+     `apps/aws-serving-api`;
+   - definir les artefacts immuables: image producer ECR, scripts Glue,
+     `jobs-utils.zip`, registry SQL, SQL, contrat Avro et package Lambda;
+   - garder cette phase sans `terraform apply`, sans job Glue, sans runtime
+     ECS/Kinesis et sans deploiement Streamlit Cloud.
+9. Phase d'implementation CI/CD et deploiement AWS preparatoire:
+   - implementer le workflow GitHub Actions sur `ubuntu-latest`;
+   - publier les artefacts avec une version immuable basee sur le commit SHA;
+   - faire consommer a Terraform les tags/cles/hashes produits par la CI/CD;
+   - appliquer Terraform automatiquement pour l'environnement dev/POC seulement
+     apres bootstrap;
+   - garder le runtime inactif par defaut avant preuve globale:
+     `ecs_service_desired_count = 0`, pas de lancement Glue, projection
+     schedule desactivee et pas de deploy Streamlit Cloud.
+10. Phase de validation runtime AWS globale:
    - seulement apres cadrage et implementation des briques AWS retenues:
      producer/Kinesis/ECS, Kinesis -> S3 Raw/Bronze/Silver, Glue Gold,
      `trading_gold` S3/Athena et, si elles ont ete retenues, les surfaces
      applicatives/observabilite;
+   - seulement apres l'audit statique qualite/conformite et le systeme CI/CD /
+     deploiement preparatoire automatise;
    - executer `terraform plan/apply`, les jobs AWS, les verifications
      Kinesis/ECS/S3/Glue/Athena et les checks des surfaces implementees;
    - sinon, laisser ces preuves explicitement manquantes.
@@ -259,6 +291,7 @@ apres le socle producer/lake/Glue.
 | Contrats, producer/lake et Glue avant le wiring API/dashboard | Les surfaces API et dashboard dependent des schemas et sorties lake |
 | Streamlit Cloud + Cognito par defaut pour le dashboard POC | Simple, securise et limite l'exploitation serveur; ECS/Fargate seulement si l'UI doit etre hebergee dans AWS |
 | Cadrage technique avant implementation AWS large | Evite d'empiler les services sans decision claire de packaging, IAM et CI/CD |
+| CI/CD automatisee avant runtime AWS global | Evite les validations manuelles non reproductibles |
 | Runtime AWS seulement avec preuves reelles | Evite de confondre implementation, tests statiques et deploiement effectif |
 | Pas de structure repo parallele inutile | Evite duplication et over-engineering |
 
@@ -273,10 +306,18 @@ Tests attendus:
 - validation on-premise via `run-silver`, `run-gold`, `run-serving`;
 - validation statique AWS cible: `terraform fmt`, `terraform validate`, tests
   des entry points/helpers, scans de perimetre et tests de contrats;
+- audit statique qualite/conformite avant runtime AWS: structure par domaine,
+  fonctions pures et atomiques, source de verite unique, absence
+  d'over-engineering, IAM minimal, API read-only et dashboard sans acces direct
+  aux services data AWS;
+- validation CI/CD et deploiement preparatoire avant runtime AWS: GitHub
+  Actions OIDC, artefacts immuables ECR/S3, Terraform automatise en dev/POC et
+  runtime desactive par defaut;
 - validation runtime AWS cible seulement quand le chemin retenu est cadre,
-  developpe et qu'un compte est disponible: Kinesis/ECS, ingestion
-  Raw/Bronze/Silver S3, Glue Gold, Glue Catalog, Athena et seulement plus tard
-  DynamoDB/API/Cognito/dashboard/observabilite si ces surfaces ont ete implementees.
+  developpe, audite statiquement, deployee par CI/CD et qu'un compte est
+  disponible: Kinesis/ECS, ingestion Raw/Bronze/Silver S3, Glue Gold, Glue
+  Catalog, Athena et seulement plus tard DynamoDB/API/Cognito/dashboard/
+  observabilite si ces surfaces ont ete implementees.
 
 Criteres d'acceptation:
 
@@ -320,6 +361,8 @@ Contraintes:
   packaging ECR, jobs Spark vers Glue, artefacts S3, Terraform et CI/CD;
 - cadrer puis implementer ensuite le maillon Kinesis -> S3 Raw/Bronze/Silver
   avant toute validation runtime AWS globale;
+- cadrer puis implementer un systeme CI/CD et deploiement AWS preparatoire
+  automatise avant toute validation runtime AWS globale;
 - viser le contrat Avro canonique aussi cote Kinesis AWS; JSON reste acceptable
   comme simplification POC ponctuelle, mais la cible retenue est Avro binaire
   dans Kinesis et Parquet dans le lake;

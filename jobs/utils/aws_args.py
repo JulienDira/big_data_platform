@@ -20,3 +20,7 @@ def option(name: str, default: str | None = None) -> str:
 
 def optional_option(name: str, default: str) -> str:
     return option(name, default)
+
+
+def list_option(name: str, default: str) -> list[str]:
+    return [item.strip() for item in option(name, default).split(",") if item.strip()]

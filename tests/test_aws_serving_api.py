@@ -140,6 +140,21 @@ class AwsServingApiTest(unittest.TestCase):
         for value in forbidden:
             self.assertNotIn(value, combined)
 
+    def test_projection_handler_does_not_depend_on_api_handler(self):
+        projection_source = (APP_PATH / "projection_handler.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("from api_handler import", projection_source)
+
+    def test_lambdas_do_not_publish_custom_cloudwatch_metrics(self):
+        combined = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in APP_PATH.glob("*.py")
+        )
+
+        self.assertNotIn("put_metric_data", combined)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,259 +1,266 @@
 # AWS static quality audit
 
-Phase: static quality and conformity audit of previous AWS phases.
+Phase: static quality, standards and conformance audit of the current AWS
+implementation.
 
-Date: 2026-07-01.
+Date: 2026-07-02.
 
-This audit is documentation and static validation only. It did not add runtime
-features, did not run AWS resources, and did not correct functional code.
+This audit is documentation, code review, static validation and local unit
+validation only. It did not run `terraform plan`, `terraform apply`, AWS CLI
+runtime checks, real Glue jobs, ECS tasks, Kinesis producers, deployed API
+Gateway/Lambda endpoints, Cognito flows, Streamlit Cloud deployment or AWS
+Budgets runtime checks.
+
+## Official references consulted
+
+- AWS Well-Architected Data Analytics Lens:
+  <https://docs.aws.amazon.com/wellarchitected/latest/analytics-lens/analytics-lens.html>
+- AWS Glue best practices:
+  <https://docs.aws.amazon.com/prescriptive-guidance/latest/serverless-etl-aws-glue/best-practices.html>
+- AWS Lambda best practices:
+  <https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html>
+- API Gateway security best practices:
+  <https://docs.aws.amazon.com/apigateway/latest/developerguide/security-best-practices.html>
+- DynamoDB partition key best practices:
+  <https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html>
+- Terraform language style guide:
+  <https://developer.hashicorp.com/terraform/language/style>
+- Streamlit Community Cloud secrets management:
+  <https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management>
+
+Provider guidance used for this audit:
+
+- develop and test Glue jobs locally before AWS execution;
+- partition analytical datasets by query patterns and use Parquet/columnar
+  storage;
+- keep Lambda clients/configuration reusable, use environment variables and
+  least-privilege IAM;
+- rely on API Gateway logging and CloudWatch alarms for API observability;
+- design DynamoDB keys from access patterns and watch for uneven partition
+  activity;
+- keep Terraform variables typed/described and run `fmt`/`validate`;
+- keep Streamlit secrets out of Git and access AWS data through the API.
 
 ## Decision
 
-No blocking static non-conformity was found in the checked repo state.
+No blocking static non-conformity remains after this phase.
 
-The AWS core producer/Kinesis/ECS/ECR path, Kinesis -> S3
-Raw/Bronze/Silver lake path, and Glue Gold/trading_gold path are coherent with
-the current cadrage and are ready for the next cadrage phase:
-restitution/API/observability.
+The current AWS implementation is conformant enough for the next CI/CD and
+deployment preparation phase. Runtime AWS validation still requires automated
+artifact publication and reproducible deployment preparation first.
 
-This is not AWS runtime proof. The AWS path remains prepared and statically
+This is not AWS runtime proof. The AWS path remains statically and locally
 validated only.
 
-Follow-up implemented on 2026-07-01:
+## Corrected findings
 
-- `apps/binance-producer/avro_codec.py` now delegates Avro binary
-  serialization/deserialization to `fastavro` only.
-- The previous manual Avro fallback was removed.
-- Producer-side invalid Avro payload decoding is covered by unit tests.
-- A guarded Bronze test now exercises the invalid direct Avro path when the
-  Spark Avro package is available in the local test classpath.
+1. Important - projection Lambda depended on API handler internals.
 
-## Blocking findings
+   Before this phase, the projection handler reused Athena helpers by importing
+   them from `api_handler.py`. That kept the projection code physically
+   separate, but created an avoidable dependency from the write projection to
+   the read API handler.
 
-None.
+   Correction:
+   - shared AWS/Athena helpers now live in `apps/aws-serving-api/serving_common.py:91`;
+   - `start_athena_query`, `wait_for_athena_query` and `get_athena_page` are
+     shared helpers in `apps/aws-serving-api/serving_common.py:253`;
+   - `apps/aws-serving-api/projection_handler.py:8` imports from
+     `serving_common`, not from `api_handler`;
+   - `tests/test_aws_serving_api.py:143` protects that boundary.
 
-No Terraform resource for AWS RDS/PostgreSQL, DynamoDB, Lambda, API Gateway or
-Budgets was found in `infra/aws`.
+   Impact: the API read handler and latest-metrics projection remain separate
+   while sharing neutral infrastructure helpers.
 
-## Important findings
+2. Important - synchronous custom CloudWatch metric widened Lambda IAM.
+
+   Before this phase, API/projection code could publish a custom
+   `AthenaQueryFailure` metric, requiring `cloudwatch:PutMetricData` with a
+   wildcard resource. Lambda and API Gateway already expose native error and
+   5xx metrics, and provider guidance favors CloudWatch alarms over synchronous
+   metric publishing from handler code for this POC.
+
+   Correction:
+   - Lambda code no longer calls `put_metric_data`;
+   - `infra/aws/serving/iam.tf` no longer grants `cloudwatch:PutMetricData`;
+   - the custom `AthenaQueryFailure` alarm was removed;
+   - native alarms remain for API Gateway, Lambda, DynamoDB, Kinesis and ECS in
+     `infra/aws/serving/monitoring.tf:19`;
+   - `infra/aws/serving/outputs.tf:36` now exports only existing alarm names;
+   - `tests/test_aws_serving_api.py:153` and `tests/test_contract.py:69`
+     protect the cleanup.
+
+   Impact: IAM is narrower and observability remains covered by native service
+   metrics and existing alarms.
+
+3. Minor - Gold AWS duplicated Glue/runtime option parsing.
+
+   `jobs/gold-indicators/aws.py` kept local `option` and `list_option`
+   helpers while Raw, Bronze and Silver AWS entry points used
+   `jobs/utils/aws_args.py`.
+
+   Correction:
+   - `jobs/utils/aws_args.py:7` remains the shared option parser;
+   - `jobs/utils/aws_args.py:25` now provides `list_option`;
+   - `jobs/gold-indicators/aws.py:15` imports the shared helpers.
+
+   Impact: AWS entry point argument parsing has one shared helper.
+
+## Remaining important findings
 
 1. AWS runtime proof is still missing.
 
    Evidence:
-   - `docs/aws-service-iam-decisions.md:23` states that AWS producer/lake
-     ingestion runtime proof is missing.
-   - `docs/aws-service-iam-decisions.md:41-44` marks Glue Streaming,
-     S3 writes and Athena execution as prepared but not runtime proven.
-   - `docs/aws-service-iam-decisions.md:112-113` keeps AWS as statically
-     validated only until real AWS checks are performed.
+   - `docs/phase-handoff.md` states that no AWS account/credentials are
+     currently available for runtime validation.
+   - `docs/aws-service-iam-decisions.md` keeps producer, lake ingestion,
+     Glue/Athena, DynamoDB/API/Cognito/Streamlit and observability surfaces as
+     `Prepare`, with runtime proof missing.
 
-   Impact: this does not block the next cadrage phase, but it blocks any claim
-   that the AWS path is deployed or end-to-end validated.
+   Required before claiming runtime validation: deploy and check ECS/Kinesis,
+   Glue Raw/Bronze/Silver, S3 outputs, Glue Gold, `trading_gold`, Glue Catalog,
+   Athena, DynamoDB projection, API Gateway/Lambda, Cognito, Streamlit Cloud,
+   alarms and Budget in a real AWS account.
 
-   Required before AWS runtime validation: deploy and check ECS/Kinesis,
-   Glue Streaming, Raw/Bronze/Silver S3, Glue Gold, Glue Catalog and Athena in
-   a real AWS account.
-
-2. CI/CD and immutable artifact publication remain missing.
+2. CI/CD and immutable artifact publication remain outside this static phase.
 
    Evidence:
-   - `docs/aws-service-iam-decisions.md:30` keeps CI/CD as `A developper`.
-   - `docs/aws-core-portability-cadrage.md:186-189` assigns producer image
-     build, ECR push and versioned artifacts to CI/CD.
-   - `infra/aws/core/README.md:21-35` documents the image build/push as a
-     manual step for now.
-   - `infra/aws/batch/main.tf:23-24` has an artifact version variable path, but
-     `infra/aws/batch/README.md:24-25` keeps the default `local-dev` path for
-     local static validation.
+   - `docs/aws-service-iam-decisions.md` still marks CI/CD as
+     `A developper`;
+   - `infra/aws/core/README.md` still documents manual image build/push for
+     now;
+   - `infra/aws/batch` still supports local-dev artifact upload for static
+     preparation.
 
-   Impact: not blocking for the next cadrage phase, but blocking for a clean
-   repeatable deployment phase.
+   Impact: not blocking for static conformance, but blocking before global AWS
+   runtime validation. Runtime proof should not start until immutable
+   image/Glue/Lambda artifact publication is automated.
 
-   Required before runtime-oriented deployment: implement or document the
-   selected CI/CD path for immutable producer images and Glue artifacts.
-
-3. Malformed Avro coverage improved, with one remaining local classpath limit.
+3. Bronze invalid direct Avro rejection remains classpath-dependent locally.
 
    Evidence:
-   - `apps/binance-producer/avro_codec.py` now uses `fastavro.parse_schema`,
-     `fastavro.schemaless_writer` and `fastavro.schemaless_reader`.
-   - `tests/test_producer_aws.py` validates positive Avro payload
-     encoding/decoding and invalid payload failure for the AWS producer.
-   - `tests/test_utils_transforms.py` includes a guarded invalid direct Avro
-     Bronze test.
-   - Local `platform.ps1 test` skips that Bronze decoder test when the Spark
-     Avro package is not available in the local Spark classpath.
+   - `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test` passed with
+     one skipped test: Spark Avro package is not available in the local test
+     classpath.
 
-   Impact: producer Avro behavior is now covered with `fastavro`. The direct
-   Spark `from_avro` rejection path should still be executed in an environment
-   where `org.apache.spark:spark-avro` is present, such as the configured
-   Spark submit or Glue runtime.
+   Impact: acceptable for local static validation. The guarded test should be
+   executed in an environment where `org.apache.spark:spark-avro` is available,
+   such as the configured submit path or Glue runtime.
 
-4. Full Glue Schema Registry integration is intentionally deferred and still
-   uncadred.
+## Conformities observed
+
+1. AWS medallion path is readable and phase-aligned.
 
    Evidence:
-   - `docs/aws-service-iam-decisions.md:37` keeps the canonical Avro contract
-     as prepared and Glue Schema Registry as reported.
-   - `docs/aws-core-portability-cadrage.md:62-65` explicitly defers full Glue
-     Schema Registry integration.
+   - `apps/binance-producer/aws.py` publishes Kinesis records using canonical
+     Avro payloads and `symbol|interval` partition keys;
+   - `jobs/raw-consumer/aws.py`, `jobs/bronze-ingestion/aws.py` and
+     `jobs/silver-transformation/aws.py` keep AWS entry points in the existing
+     logical job folders;
+   - `jobs/gold-indicators/aws.py` reads Silver S3 and writes Gold plus
+     `trading_gold` Parquet datasets.
 
-   Impact: acceptable for the current binary Avro Kinesis scope, but should not
-   be described as implemented schema registry governance.
-
-## Minor findings
-
-1. The Athena query role is still a later design item.
-
-   Evidence:
-   - `docs/aws-service-iam-decisions.md:64` marks `athena-query-role` as
-     `A cadrer`.
-   - `docs/aws-service-iam-decisions.md:87` keeps AWS runtime validation on
-     S3/Glue/Athena as reported.
-
-   Impact: non-blocking for current static AWS path; to be framed in the
-   restitution/API/observability cadrage if an API or dashboard needs query
-   access.
-
-2. The runtime proof wording is mostly clear, but future agents must avoid
-   treating README runtime commands as audit commands.
+2. Shared transformations stay reusable and environment details stay at the
+   edge.
 
    Evidence:
-   - `infra/aws/core/README.md:38-43` documents Terraform runtime workflow,
-     including `terraform plan`, for a future deployment context.
-   - `docs/aws-phase-prompts.md:131-133` and
-     `docs/aws-lake-ingestion-cadrage.md:421-428` keep runtime validation and
-     forbidden services out of the static implementation phases.
+   - `jobs/utils/bronze.py` contains Avro decode and Bronze valid/rejected
+     transformations;
+   - `jobs/utils/silver.py` contains the Silver quality/dedup/select logic;
+   - `jobs/utils/serving.py` materializes restitution tables from shared SQL;
+   - Spark sessions, S3 paths, Kinesis stream names and write modes stay in
+     entry points or small IO helpers.
 
-   Impact: no doc correction is required now; audit and handoff should keep
-   the command boundary explicit.
-
-## Conformities
-
-1. AWS producer publishes canonical Avro binary records to Kinesis.
+3. API and projection responsibilities are separated.
 
    Evidence:
-   - `contracts/market-candle/v1.avsc:7-23` defines the canonical candle
-     fields from `event_id` to `ingested_at`.
-   - `apps/binance-producer/aws.py:35-42` encodes the candle and sets the
-     Kinesis `PartitionKey`.
-   - `apps/binance-producer/common.py:34-35` builds the key as
-     `symbol|interval`.
-   - `tests/test_producer_aws.py:41-54` validates the partition key, canonical
-     Avro fields and non-JSON binary payload behavior.
+   - `apps/aws-serving-api/api_handler.py` exposes read-only routes for health,
+     latest metrics, history, signals and daily summaries;
+   - `apps/aws-serving-api/projection_handler.py` is the only Lambda handler
+     that writes latest metrics to DynamoDB;
+   - `rg -n "SparkSession|pyspark|calculate_indicators|rolling|ewm"
+     apps/aws-serving-api` returned no match.
 
-2. Raw AWS keeps a technical envelope and partitions by operational metadata.
+4. Streamlit uses API Gateway and Cognito-facing configuration only.
 
    Evidence:
-   - `jobs/raw-consumer/aws.py:30-38` reads Kinesis with Spark Structured
-     Streaming and decodes Avro status.
-   - `jobs/raw-consumer/aws.py:45-56` preserves stream, partition key,
-     sequence number, payload and decode status.
-   - `jobs/raw-consumer/aws.py:64-68` writes Parquet by symbol, interval,
-     ingestion date and ingestion hour.
+   - `apps/streamlit-dashboard/app.py` reads configuration through
+     `st.secrets` or environment variables;
+   - it calls API paths through `requests`;
+   - `rg -n "boto3|botocore|aioboto3|awswrangler|s3fs"
+     apps/streamlit-dashboard` returned no match.
 
-3. Bronze and Silver keep reusable transformations in `jobs/utils`.
-
-   Evidence:
-   - `jobs/bronze-ingestion/aws.py:33-39` reads Raw, decodes via shared helpers
-     and writes Bronze plus rejected rows.
-   - `jobs/utils/bronze.py:11-48` contains shared Avro decode and Bronze
-     valid/rejected transformations.
-   - `jobs/silver-transformation/aws.py:26-27` calls shared `build_silver` and
-     writes Silver S3.
-   - `jobs/utils/silver.py:10-18` applies quality rules and deterministic
-     deduplication before selecting `SILVER_COLUMNS`.
-   - `tests/test_utils_transforms.py:92-119` validates that Silver keeps the
-     expected contract for Gold.
-
-4. Gold AWS and restitution remain in S3/Glue/Athena, not PostgreSQL.
+5. Terraform is modular enough for the current scope.
 
    Evidence:
-   - `jobs/gold-indicators/aws.py:52-53` computes indicators and writes Gold
-     Parquet.
-   - `jobs/gold-indicators/aws.py:60-69` materializes the shared restitution
-     tables and writes them to `trading_gold` paths.
-   - `jobs/serving-datamart/registry.py:18-35` declares the four restitution
-     tables.
-   - `infra/aws/batch/glue_catalog.tf:260-301` declares the
-     `trading_gold.*` Glue/Athena tables.
+   - `infra/aws/core` owns producer/Kinesis/ECR/ECS;
+   - `infra/aws/batch` owns lake S3, Glue jobs, Glue Catalog and Athena;
+   - `infra/aws/serving` owns DynamoDB, Lambda/API, Cognito, alarms and Budget;
+   - `terraform fmt -check -recursive infra/aws` passed;
+   - Terraform variables are typed and described in the inspected modules.
 
-5. Terraform scope is coherent.
+6. RDS/PostgreSQL AWS remains absent.
 
    Evidence:
-   - `infra/aws/core/main.tf:32-112` declares Kinesis, ECR, CloudWatch, ECS
-     task and ECS service for the producer path.
-   - `infra/aws/core/iam.tf:22-25` scopes producer publishing to Kinesis.
-   - `infra/aws/batch/main.tf:16-35` centralizes Raw, Bronze, Silver, rejected,
-     checkpoint and output S3 paths.
-   - `infra/aws/batch/glue_job.tf:397-584` declares Raw, Bronze, Silver and
-     Gold Glue jobs with their artifacts.
-   - `infra/aws/batch/glue_job.tf:42-155` and
-     `infra/aws/batch/glue_job.tf:158-276` separate Raw streaming and lake
-     transform IAM roles.
-
-6. Deferred AWS services are kept out of Terraform.
-
-   Evidence:
-   - `docs/aws-service-iam-decisions.md:45-48` keeps DynamoDB, API,
-     Streamlit and advanced Budgets/alarms as later scope.
-   - Static scans over `infra/aws/*.tf` returned no match for:
-     `aws_db`, `aws_rds`, `postgres`, `postgresql`, `aws_dynamodb`,
-     `aws_lambda`, `aws_api_gateway`, `aws_apigateway` or
-     `aws_budgets_budget`.
+   - `rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"`
+     returned no match.
 
 ## Validation results
 
 Commands run:
 
 ```powershell
-git status --short
+git status --short --untracked-files=all
 powershell -ExecutionPolicy Bypass -File .\platform.ps1 test
-terraform fmt -check -recursive infra/aws
-terraform -chdir=infra/aws/core validate
-terraform -chdir=infra/aws/batch validate
-rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"
-rg -n "aws_dynamodb|aws_lambda|aws_api_gateway|aws_apigateway|aws_budgets_budget" infra/aws -g "*.tf"
+terraform fmt -check -recursive infra\aws
+terraform -chdir=infra\aws\core validate
+terraform -chdir=infra\aws\batch validate
+terraform -chdir=infra\aws\serving validate
+rg -n "aws_db|aws_rds|postgres|postgresql" infra\aws -g "*.tf"
+rg -n "boto3|botocore|aioboto3|awswrangler|s3fs" apps\streamlit-dashboard
+rg -n "SparkSession|pyspark|calculate_indicators|rolling|ewm" apps\aws-serving-api
 git diff --check
 ```
 
 Results:
 
-- `git status --short`: clean before audit edits.
-- First `platform.ps1 test` attempt failed on Windows Docker access
-  (`config.json` and Docker pipe access denied), not on test assertions.
-- Same test command rerun with Docker access: passed, 23 tests OK.
-- Follow-up `platform.ps1 test` after the `fastavro` cleanup: passed, 25 tests
-  OK with 1 skipped Bronze Spark Avro classpath test.
-- `terraform fmt -check -recursive infra/aws`: passed.
-- `terraform -chdir=infra/aws/core validate`: passed.
-- `terraform -chdir=infra/aws/batch validate`: passed.
+- `git status --short --untracked-files=all`: working tree was already dirty
+  before this phase, with modified documentation files. No existing change was
+  reverted.
+- First direct `python -m unittest ...` attempt failed because the WindowsApps
+  Python launcher could not create the process.
+- First `platform.ps1 test` attempt failed on Windows Docker access:
+  `C:\Users\julie\.docker\config.json: Access is denied` and
+  `//./pipe/docker_engine: Access is denied`.
+- `platform.ps1 test` rerun with elevated Docker access succeeded:
+  35 tests OK, 1 skipped because local Spark lacks `spark-avro`.
+- `terraform fmt -check -recursive infra\aws`: passed.
+- `terraform -chdir=infra\aws\core validate`: passed.
+- `terraform -chdir=infra\aws\batch validate`: passed.
+- `terraform -chdir=infra\aws\serving validate`: passed.
 - Forbidden AWS PostgreSQL/RDS scan: no match.
-- Forbidden DynamoDB/Lambda/API Gateway/Budgets scan: no match.
-- `git diff --check`: passed; Git reported an LF/CRLF normalization warning
-  for `docs/phase-handoff.md`.
+- Forbidden direct AWS SDK imports in Streamlit scan: no match.
+- Lambda/API Spark or indicator calculation scan: no match.
+- `git diff --check`: passed. Git printed LF/CRLF normalization warnings for
+  modified files on Windows.
 
 Not run:
 
 - `terraform plan`;
 - `terraform apply`;
-- AWS CLI against a real account;
-- ECS, Kinesis, Glue or Athena runtime checks.
+- AWS CLI runtime checks;
+- ECS, Kinesis, Glue, S3, Athena, DynamoDB, API Gateway, Lambda, Cognito,
+  Streamlit Cloud, CloudWatch alarms or Budget runtime checks.
 
 ## Recommendation
 
-Proceed to the next cadrage phase only:
-`Phase 5 prompt - Restitution, API and observability cadrage` in
+Proceed to the CI/CD and automated deployment cadrage/implementation path
+before any global AWS runtime validation.
+
+Use `Phase 8 prompt - AWS CI/CD and artifact deployment implementation` in
 `docs/aws-phase-prompts.md`.
 
-Do not proceed to AWS runtime validation yet. Runtime validation belongs after
-deployment credentials exist and the selected producer/lake/Gold/restitution
-path can be checked on real AWS surfaces.
-
-Before a runtime validation phase, address or explicitly accept:
-
-- CI/CD or immutable artifact publication path;
-- execution of the guarded Bronze invalid Avro test in a Spark/Glue classpath
-  that includes `spark-avro`;
-- Glue Schema Registry stance;
-- Athena query role and API/dashboard access model if included in scope.
+Global runtime validation should be recommended only after immutable ECR, Glue
+and Lambda artifacts are published by CI/CD, Terraform consumes those versions,
+and the dev/POC deployment preparation path is reproducible. Do not claim AWS
+runtime validation from the static results above.

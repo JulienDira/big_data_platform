@@ -12,28 +12,11 @@ sys.path.insert(0, str(JOBS_ROOT))
 sys.path.insert(0, str(JOBS_ROOT / "serving-datamart"))
 
 from registry import get_serving_tables, read_table_sql, render_sql
+from utils.aws_args import list_option, option
 from utils.indicators import calculate_indicators
 from utils.market_schema import GOLD_PARTITIONS, GOLD_SOURCE_COLUMNS
 from utils.s3_io import write_parquet_dataset
 from utils.serving import build_serving_render_context, materialize_serving_tables
-
-
-def option(name: str, default: str | None = None) -> str:
-    flag = f"--{name}"
-    for index, value in enumerate(sys.argv):
-        if value == flag and index + 1 < len(sys.argv):
-            return sys.argv[index + 1]
-        if value.startswith(f"{flag}="):
-            return value.split("=", 1)[1]
-
-    value = os.getenv(name, default)
-    if not value:
-        raise RuntimeError(f"Missing required option or environment variable: {name}")
-    return value
-
-
-def list_option(name: str, default: str) -> list[str]:
-    return [item.strip() for item in option(name, default).split(",") if item.strip()]
 
 
 def table_output_path(base_path: str, table_name: str) -> str:

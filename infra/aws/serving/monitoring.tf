@@ -181,20 +181,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   }
 }
 
-resource "aws_cloudwatch_metric_alarm" "athena_query_failures" {
-  alarm_name          = "${local.name_prefix}-athena-query-failures"
-  alarm_description   = "Custom metric emitted when the API or projection sees an Athena query failure."
-  namespace           = local.metric_namespace
-  metric_name         = "AthenaQueryFailure"
-  statistic           = "Sum"
-  period              = 300
-  evaluation_periods  = 1
-  threshold           = 1
-  comparison_operator = "GreaterThanOrEqualToThreshold"
-  treat_missing_data  = "notBreaching"
-  alarm_actions       = local.alarm_actions
-}
-
 resource "aws_cloudwatch_event_rule" "glue_job_failures" {
   name        = "${local.name_prefix}-glue-job-failures"
   description = "Detect failed, timed out or stopped Glue jobs in the market pipeline."

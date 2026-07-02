@@ -45,7 +45,6 @@ output "cloudwatch_alarm_names" {
     aws_cloudwatch_metric_alarm.kinesis_write_throttles.alarm_name,
     aws_cloudwatch_metric_alarm.kinesis_iterator_age.alarm_name,
     aws_cloudwatch_metric_alarm.ecs_cpu_high.alarm_name,
-    aws_cloudwatch_metric_alarm.athena_query_failures.alarm_name,
   ]
 }
 
