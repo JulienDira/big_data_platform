@@ -9,6 +9,10 @@ data "aws_iam_policy_document" "glue_assume_role" {
   }
 }
 
+data "aws_kinesis_stream" "market" {
+  name = var.market_candles_stream_name
+}
+
 resource "aws_iam_role" "glue_batch" {
   name               = "${local.name_prefix}-glue-batch-role"
   assume_role_policy = data.aws_iam_policy_document.glue_assume_role.json
@@ -51,7 +55,7 @@ data "aws_iam_policy_document" "glue_raw_streaming" {
       "kinesis:SubscribeToShard",
     ]
     resources = [
-      var.market_candles_stream_arn,
+      data.aws_kinesis_stream.market.arn,
     ]
   }
 
