@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/aws-deploy.yml"
+DESTROY_WORKFLOW = ROOT / ".github/workflows/aws-destroy.yml"
 
 
 class AwsDeployWorkflowTest(unittest.TestCase):
@@ -25,11 +26,9 @@ class AwsDeployWorkflowTest(unittest.TestCase):
         self.assertIn("unset-current-credentials: true", self.source)
         self.assertIn("environment: dev", self.source)
 
-    def test_pull_requests_validate_without_publication_apply_or_runtime(self):
-        self.assertIn("pull_request:", self.source)
-        self.assertIn("push:", self.source)
-        # Pull request validation should run for the main branch and any allowed deployment branches.
-        self.assertRegex(self.source, r"branches:\s*\[main(?:,\s*multi-deployment)?\]")
+    def test_deployment_is_manual_only(self):
+        self.assertNotIn("pull_request:", self.source)
+        self.assertNotIn("push:", self.source)
         self.assertIn("workflow_dispatch:", self.source)
         self.assertEqual(3, self.source.count("if: github.event_name != 'pull_request'"))
 
@@ -79,6 +78,18 @@ class AwsDeployWorkflowTest(unittest.TestCase):
     def test_deployment_jobs_use_concurrency_without_canceling_running_apply(self):
         self.assertIn("group: aws-dev-deployment", self.source)
         self.assertIn("cancel-in-progress: false", self.source)
+
+    def test_destroy_workflow_exists_with_manual_confirmation_and_reverse_order(self):
+        self.assertTrue(DESTROY_WORKFLOW.exists(), "Destroy workflow should exist")
+        source = DESTROY_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("name: AWS Destroy", source)
+        self.assertIn("workflow_dispatch:", source)
+        self.assertIn("confirm_destroy:", source)
+        self.assertIn("DESTROY", source)
+        self.assertIn("terraform -chdir=infra/aws/orchestration destroy", source)
+        self.assertIn("terraform -chdir=infra/aws/serving destroy", source)
+        self.assertIn("terraform -chdir=infra/aws/batch destroy", source)
+        self.assertIn("terraform -chdir=infra/aws/core destroy", source)
 
 
 if __name__ == "__main__":
