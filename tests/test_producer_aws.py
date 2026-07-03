@@ -96,6 +96,80 @@ class ProducerAwsTest(unittest.TestCase):
             [call["StreamName"] for call in client.calls],
         )
 
+    def test_publish_records_retries_only_failed_kinesis_records(self):
+        class FakeKinesisClient:
+            def __init__(self):
+                self.calls = []
+
+            def put_records(self, **kwargs):
+                self.calls.append(kwargs)
+                if len(self.calls) == 1:
+                    return {
+                        "FailedRecordCount": 1,
+                        "Records": [
+                            {"SequenceNumber": "1", "ShardId": "shardId-000"},
+                            {
+                                "ErrorCode": "ProvisionedThroughputExceededException",
+                                "ErrorMessage": "Rate exceeded",
+                            },
+                            {"SequenceNumber": "3", "ShardId": "shardId-000"},
+                        ],
+                    }
+                return {
+                    "FailedRecordCount": 0,
+                    "Records": [{"SequenceNumber": "2", "ShardId": "shardId-000"}],
+                }
+
+        client = FakeKinesisClient()
+        contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
+        records = [
+            MODULE.build_kinesis_record(canonical_candle(), contract) for _ in range(3)
+        ]
+
+        MODULE.publish_records(
+            client,
+            "market-candles",
+            records,
+            batch_size=3,
+            retry_backoff_seconds=0,
+        )
+
+        self.assertEqual([3, 1], [len(call["Records"]) for call in client.calls])
+        self.assertEqual(records[1], client.calls[1]["Records"][0])
+
+    def test_publish_records_raises_after_bounded_retries(self):
+        class FakeKinesisClient:
+            def __init__(self):
+                self.calls = []
+
+            def put_records(self, **kwargs):
+                self.calls.append(kwargs)
+                return {
+                    "FailedRecordCount": 1,
+                    "Records": [
+                        {
+                            "ErrorCode": "InternalFailure",
+                            "ErrorMessage": "Internal service failure",
+                        }
+                    ],
+                }
+
+        client = FakeKinesisClient()
+        contract = load_schema(ROOT / "contracts/market-candle/v1.avsc")
+        records = [MODULE.build_kinesis_record(canonical_candle(), contract)]
+
+        with self.assertRaisesRegex(RuntimeError, "Kinesis put_records failed"):
+            MODULE.publish_records(
+                client,
+                "market-candles",
+                records,
+                batch_size=1,
+                max_attempts=2,
+                retry_backoff_seconds=0,
+            )
+
+        self.assertEqual(2, len(client.calls))
+
 
 if __name__ == "__main__":
     unittest.main()

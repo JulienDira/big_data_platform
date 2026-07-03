@@ -28,9 +28,11 @@ Binance REST -> ECS/Fargate producer -> Kinesis Data Stream
 PostgreSQL remains an on-premise Serving target only. RDS/PostgreSQL is not part
 of the current AWS target.
 
-No AWS account/credentials are currently available for runtime validation.
+No local AWS credentials are currently available for runtime validation:
+`aws sts get-caller-identity` returns `Unable to locate credentials`. The
+GitHub CLI is also unavailable locally: `gh` is not recognized as a command.
 AWS checks must therefore be reported as static/local only unless a real AWS
-account is used.
+account and GitHub environment are used.
 
 ## Previous Proven Baseline
 
@@ -49,7 +51,8 @@ the AWS phases:
 
 AWS preparation before this phase:
 
-- `apps/binance-producer/aws.py` exists as the Kinesis producer entry point.
+- `apps/binance-producer/aws.py` exists as the Kinesis producer entry point and
+  retries failed `PutRecords` entries with bounded attempts.
 - `infra/aws/core` exists for Kinesis, ECR, ECS/Fargate, IAM and producer logs.
 - `jobs/raw-consumer/aws.py`, `jobs/bronze-ingestion/aws.py` and
   `jobs/silver-transformation/aws.py` prepare Kinesis -> Raw/Bronze/Silver S3.
@@ -62,138 +65,146 @@ AWS preparation before this phase:
 
 ## Last Completed Phase
 
-Phase: AWS CI/CD and artifact deployment implementation.
+Phase: Phase 10 - AWS automated deployment and runtime validation.
 
-Goal: implement the reproducible AWS CI/CD preparation path required before
-global AWS runtime validation: GitHub Actions OIDC, immutable producer image,
-Glue artifacts, Lambda Zip/S3 package and Terraform inputs.
+Goal: harden the GitHub Actions/Terraform AWS deployment path so that, after
+one-time GitHub/AWS bootstrap, a push to `main` validates, publishes immutable
+artifacts, deploys the dev/POC AWS stack and runs controlled runtime
+validation.
 
-Status: completed as static/local implementation. No local `terraform apply`,
-AWS CLI runtime check, real Glue job, ECS/Kinesis runtime, API deployment,
-Cognito login, Streamlit Cloud deployment or Budget runtime check was run.
-
-## Phase Scope
-
-Required docs read:
-
-- `AGENTS.md`;
-- `cadrage.md`;
-- `docs/phase-handoff.md`;
-- `docs/phase-template.md`;
-- `docs/aws-service-iam-decisions.md`;
-- `docs/aws-phase-prompts.md`;
-- `docs/aws-static-quality-audit.md`;
-- `docs/aws-cicd-deployment-cadrage.md`;
-- `docs/aws-core-portability-cadrage.md`;
-- `docs/aws-lake-ingestion-cadrage.md`;
-- `docs/aws-serving-observability-cadrage.md`.
-
-Files inspected:
-
-- `.github` state, which was absent before this phase;
-- `infra/aws/core`, `infra/aws/batch` and `infra/aws/serving`;
-- `apps/binance-producer`, `apps/aws-serving-api`, `jobs`, `infra/scripts` and
-  `tests`;
-- AWS phase docs and current handoff.
+Status: completed as static/local implementation and documentation. AWS runtime
+validation was not executed because AWS credentials and GitHub CLI access are
+missing in the local environment.
 
 ## Changes Completed
 
-- Added `.github/workflows/aws-deploy.yml`:
-  - `pull_request` validates only;
-  - `push` to `main` and `workflow_dispatch` run the dev deployment
-    preparation path;
-  - AWS auth uses GitHub OIDC and `AWS_DEPLOY_ROLE_ARN`;
-  - no long-lived AWS key path is present;
-  - runtime remains stopped: core apply uses `ecs_service_desired_count=0`,
-    no Glue jobs are started and projection schedule stays disabled.
-- Added `infra/scripts/package-aws-artifacts.py`:
-  - packages Raw/Bronze/Silver/Gold Glue scripts;
-  - packages `jobs-utils.zip`, `serving-registry.zip`, SQL and Avro contract;
-  - packages `apps/aws-serving-api` as `aws-serving-api.zip`;
-  - writes the Lambda base64 SHA-256 hash for Terraform.
-- Updated `infra/aws/core`:
-  - empty S3 backend for CI;
-  - ECR image tag immutability;
-  - ECS desired count default changed to `0`.
-- Updated `infra/aws/batch`:
-  - empty S3 backend for CI;
-  - optional `glue_artifact_bucket_name`;
-  - `upload_glue_artifacts_from_workspace` keeps local-dev Terraform uploads
-    but lets CI consume pre-published immutable artifacts;
-  - Glue IAM can read artifacts from the selected artifact bucket.
-- Updated `infra/aws/serving`:
-  - empty S3 backend for CI;
-  - optional `lambda_package_s3_bucket`, `lambda_package_s3_key` and
-    `lambda_package_source_hash`;
-  - local `archive_file` packaging remains the fallback when S3 package inputs
-    are not provided.
-- Added tests for packaging layout and workflow guardrails.
-- Updated `docs/aws-cicd-deployment-cadrage.md`,
-  `docs/aws-service-iam-decisions.md` and AWS module READMEs.
+- Hardened `.github/workflows/aws-deploy.yml`:
+  - workflow-level permissions are `contents: read` only;
+  - OIDC `id-token: write` is scoped to AWS deployment jobs;
+  - deployment jobs use GitHub Environment `dev`;
+  - AWS credential steps include allowed account guard, masked account id,
+    explicit role session name and unset-current-credentials;
+  - third-party actions are pinned to full commit SHAs:
+    - `actions/checkout@v6.0.1` ->
+      `8e8c483db84b4bee98b60c0593521ed34d9990e8`;
+    - `actions/setup-python@v6.1.0` ->
+      `83679a892e2d95755f2dac6acb0bfd1e9ac5d548`;
+    - `aws-actions/configure-aws-credentials@v6.1.0` ->
+      `ec61189d14ec14c8efccab744f656cffd0e33f37`;
+    - `hashicorp/setup-terraform@v3` ->
+      `b9cd54a3c349d3f38e8881555d616ced269862dd`;
+  - Terraform backend config now uses S3 lockfiles with
+    `use_lockfile=true`;
+  - `TF_STATE_LOCK_TABLE` is no longer part of the normal GitHub Environment
+    variable contract;
+  - a `runtime-validation` job runs after Terraform apply on non-PR runs.
+- Raised AWS Terraform stack constraints to `required_version >= 1.14.0` and
+  the CI Terraform version to `1.15.7`.
+- Added `infra/scripts/aws-runtime-validate.py`:
+  - reads Terraform outputs for `core`, `batch` and `serving`;
+  - verifies immutable ECR/S3 artifacts;
+  - runs the controlled ECS/Kinesis/Glue/S3/Athena/DynamoDB/API/observability
+    runtime checks when AWS is available;
+  - writes `build/aws-runtime-evidence.json`;
+  - always attempts to scale ECS desired count back to `0` and stop Raw Glue
+    Streaming.
+- Added `infra/aws/README.md` explaining:
+  - one-time GitHub/AWS bootstrap;
+  - OIDC trust policy for
+    `repo:JulienDira/big_data_platform:environment:dev`;
+  - required GitHub Environment variables;
+  - S3 backend lockfile requirements;
+  - push-to-main flow;
+  - runtime proof checks;
+  - cleanup and cost control.
+- Updated focused tests:
+  - workflow guardrails and SHA pinning;
+  - deployment README contract;
+  - runtime validation script dry-run, evidence and cleanup behavior.
+- Updated deployment decision docs:
+  - `docs/aws-cicd-deployment-cadrage.md`;
+  - `docs/aws-service-iam-decisions.md`;
+  - `infra/aws/core/README.md`.
+
+No RDS/PostgreSQL AWS target, new AWS service family, direct Streamlit AWS SDK
+access or broad data pipeline refactor was introduced.
 
 ## Validation Completed
 
+Repository state and source control:
+
+- `git status --short --untracked-files=all` was checked before changes. The
+  tree already contained Phase 9 modified/untracked files:
+  `apps/binance-producer/aws.py`, `cadrage.md`,
+  `docs/aws-phase-prompts.md`, `docs/aws-service-iam-decisions.md`,
+  `docs/phase-handoff.md`, `tests/test_producer_aws.py` and
+  `docs/aws-implementation-step-audit.md`. They were preserved.
+- Action tag SHAs were resolved with approved network access through
+  `git ls-remote`.
+
 Static/local validation:
 
-- `git status --short --untracked-files=all` was checked before changes and
-  was clean.
-- Direct `python -m unittest ...` failed because the WindowsApps Python
-  launcher could not create the process; `py -3` was not installed.
-- `terraform fmt -recursive infra\aws` was run, then
-  `terraform fmt -check -recursive infra\aws` passed.
-- First `terraform init -backend=false` attempt failed because sandboxed
-  network access to `registry.terraform.io` was blocked.
-- `terraform -chdir=infra\aws\core init -backend=false -input=false`,
-  `terraform -chdir=infra\aws\batch init -backend=false -input=false` and
-  `terraform -chdir=infra\aws\serving init -backend=false -input=false`
-  succeeded after approved network access for provider initialization.
-- `terraform -chdir=infra\aws\core validate` passed.
-- `terraform -chdir=infra\aws\batch validate` passed.
-- `terraform -chdir=infra\aws\serving validate` passed.
 - First `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test` failed
   on Docker access:
   `C:\Users\julie\.docker\config.json: Access is denied` and Docker pipe
   access denied.
-- The same `platform.ps1 test` command succeeded after approved Docker access:
-  40 tests OK, 1 skipped because local Spark lacks the `spark-avro` package.
-- `rg -n "aws_db|aws_rds|postgres|postgresql" infra\aws -g "*.tf"` returned no
-  match.
+- The same command was rerun with approved Docker access. The first rerun
+  exposed a Python 3.8 importlib/dataclass issue in the new test harness.
+- After fixing the test import, `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test`
+  passed: 51 tests OK, 1 skipped because the local Spark classpath lacks the
+  `spark-avro` package.
+- `terraform fmt -check -recursive infra/aws` passed.
+- Initial Terraform provider initialization for `core`, `batch` and `serving`
+  failed because sandboxed network access to `registry.terraform.io` was
+  blocked.
+- After approved provider-initialization network access:
+  - `terraform -chdir=infra/aws/core init -backend=false -input=false`
+    succeeded with `hashicorp/aws v5.100.0`;
+  - `terraform -chdir=infra/aws/batch init -backend=false -input=false`
+    succeeded with `hashicorp/aws v5.100.0` and `hashicorp/archive v2.8.0`;
+  - `terraform -chdir=infra/aws/serving init -backend=false -input=false`
+    succeeded with `hashicorp/aws v5.100.0` and `hashicorp/archive v2.8.0`.
+- `terraform -chdir=infra/aws/core validate` passed.
+- `terraform -chdir=infra/aws/batch validate` passed.
+- `terraform -chdir=infra/aws/serving validate` passed.
+- `rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"`
+  returned no match.
 - `rg -n "AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|aws-access-key-id|aws-secret-access-key|secrets\." .github\workflows\aws-deploy.yml`
   returned no match.
-- `rg -n "start-job-run|update-service --desired-count|put-record|put-records|streamlit deploy" .github\workflows\aws-deploy.yml`
+- `rg -n "TF_STATE_LOCK_TABLE|dynamodb_table" .github\workflows\aws-deploy.yml infra/aws\README.md docs\aws-cicd-deployment-cadrage.md`
   returned no match.
-- `git diff --check` passed.
+- `git diff --check` passed with LF/CRLF normalization warnings on Windows.
 
-Validation not run:
+Runtime and deployment availability checks:
 
-- `terraform plan`;
-- local `terraform apply`;
-- GitHub Actions execution;
-- AWS CLI runtime checks;
-- ECS, Kinesis, Glue, S3, Athena, DynamoDB, API Gateway, Lambda, Cognito,
-  Streamlit Cloud, CloudWatch alarms or Budgets runtime checks;
-- Streamlit Cloud deployment.
+- `aws sts get-caller-identity` failed with:
+  `Unable to locate credentials. You can configure credentials by running "aws login".`
+- `gh auth status` failed because `gh` is not installed or not on PATH.
 
 ## Proof Obtained
 
-- The repo now contains a concrete GitHub Actions deployment preparation path.
-- CI/CD ownership is explicit: image and Zip/S3 artifacts are built and
-  published outside Terraform with the commit SHA as immutable version.
-- Terraform consumes artifact references and still owns durable infrastructure.
-- Local Terraform validation passes for core, batch and serving.
-- Package and workflow guardrails are protected by unit tests.
-- RDS/PostgreSQL AWS remains absent from Terraform by static scan.
+- The repository now contains a hardened push-to-main AWS deployment path using
+  job-scoped GitHub OIDC, scoped-role inputs, account guardrails, immutable
+  ECR/S3 artifacts and S3 backend lockfiles.
+- The workflow includes a controlled non-PR runtime-validation job.
+- The runtime validation script is implemented and unit-tested for dry-run
+  evidence output and cleanup behavior.
+- Local unit/static tests and Terraform validation pass.
+- Static scans show no AWS RDS/PostgreSQL target, no long-lived AWS key path in
+  the workflow and no legacy Terraform lock-table contract in the normal docs
+  or workflow.
 
 ## Not Yet Proven
 
 - GitHub Environment `dev` exists with required variables.
-- GitHub OIDC provider and deploy role exist and are trusted correctly.
-- Terraform remote state bucket and lock table exist.
+- GitHub OIDC provider and scoped deploy role exist and trust the expected
+  repository/environment subject.
+- Terraform state bucket and S3 lockfile permissions exist.
 - The workflow runs successfully on GitHub.
 - AWS producer image exists in ECR.
 - Glue and Lambda artifacts exist in S3.
 - Terraform apply succeeds in the target AWS account.
-- ECS service steady state.
+- ECS service steady state and controlled scale-down.
 - Kinesis record ingestion in AWS.
 - Glue Streaming consumption from Kinesis.
 - Raw/Bronze/Silver S3 outputs in AWS.
@@ -205,44 +216,46 @@ Validation not run:
 - Cognito Hosted UI login, groups and JWT authorizer behavior.
 - Streamlit Cloud deployment and authentication flow.
 - CloudWatch alarms, SNS notifications and AWS Budget visibility.
-- Bronze invalid direct Avro rejection through Spark `from_avro` in a classpath
-  where the `spark-avro` jar is available.
+- `build/aws-runtime-evidence.json` from a real AWS runtime-validation run.
 
 ## Next Recommended Phase
 
-Proceed to `Phase 9 prompt - AWS deployment preparation` in
-`docs/aws-phase-prompts.md`.
+Perform the one-time GitHub/AWS bootstrap described in `infra/aws/README.md`,
+then run the GitHub Actions workflow through a push to `main` or
+`workflow_dispatch`.
 
-Do not proceed to global AWS runtime validation yet. The next phase should
-bootstrap or verify GitHub OIDC, Terraform remote state/locking and GitHub
-Environment variables, then run the automated dev/POC deployment preparation
-path without starting the full data runtime.
+If bootstrap is complete and the workflow succeeds, record the
+`build/aws-runtime-evidence.json` contents and recommend a narrow
+stabilization/demo-hardening phase.
 
-## Required Start Checklist for Next Agent
+If the workflow or runtime validation fails, recommend one targeted remediation
+phase named after the failing surface, for example OIDC trust, Terraform state,
+ECR artifact publication, ECS/Kinesis, Glue Raw, Glue Bronze/Silver, Glue Gold,
+Athena, DynamoDB projection or API Gateway/Cognito.
 
-Before changing files or running deployment:
+Ready-to-use next-agent prompt:
 
-1. Read `AGENTS.md`.
-2. Read `cadrage.md`.
-3. Read this `docs/phase-handoff.md`.
-4. Read `docs/phase-template.md`.
-5. Read `docs/aws-service-iam-decisions.md`.
-6. Read `docs/aws-phase-prompts.md`.
-7. Read `docs/aws-cicd-deployment-cadrage.md`.
-8. Inspect `.github/workflows/aws-deploy.yml`, `infra/aws/core`,
-   `infra/aws/batch`, `infra/aws/serving` and `infra/scripts`.
-9. Confirm GitHub Environment `dev` variables:
-   `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `AWS_ARTIFACT_BUCKET`,
-   `TF_STATE_BUCKET`, `TF_STATE_LOCK_TABLE`, `TF_STATE_REGION`, `VPC_ID`,
-   `FARGATE_SUBNET_IDS`, `STREAMLIT_CALLBACK_URLS`,
-   `STREAMLIT_LOGOUT_URLS` and `API_CORS_ALLOWED_ORIGINS`.
-10. Keep runtime disabled by default: ECS desired count `0`, no Glue job runs,
-    projection schedule disabled and no Streamlit Cloud deploy.
-11. Do not mark AWS runtime validated unless actual AWS runtime surfaces were
-    checked.
+```text
+Mission:
+Run the deployed Phase 10 GitHub Actions path in a real AWS/GitHub environment
+after completing the bootstrap in infra/aws/README.md.
+
+Before doing anything, read AGENTS.md, cadrage.md, docs/phase-handoff.md,
+infra/aws/README.md and .github/workflows/aws-deploy.yml. Confirm GitHub
+Environment dev has AWS_ACCOUNT_ID, AWS_DEPLOY_ROLE_ARN, AWS_REGION,
+AWS_ARTIFACT_BUCKET, TF_STATE_BUCKET, TF_STATE_REGION, VPC_ID,
+FARGATE_SUBNET_IDS, STREAMLIT_CALLBACK_URLS, STREAMLIT_LOGOUT_URLS and
+API_CORS_ALLOWED_ORIGINS. Confirm the AWS OIDC provider, deploy role trust,
+state bucket and S3 lockfile permissions exist.
+
+Run the workflow from GitHub, not with local long-lived AWS keys. Capture exact
+evidence from the GitHub run, Terraform outputs and build/aws-runtime-evidence.json.
+Do not claim AWS runtime proof if any bootstrap, permission or service check is
+missing.
+```
 
 ## Suggested Commit Message
 
 ```text
-ci: add AWS artifact deployment workflow
+ci: harden AWS deployment runtime validation
 ```

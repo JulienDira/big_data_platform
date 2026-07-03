@@ -50,25 +50,59 @@ def batched(records: list[dict], batch_size: int) -> list[list[dict]]:
     ]
 
 
+def failed_records_from_response(records: list[dict], response: dict) -> list[dict]:
+    results = response.get("Records", [])
+    return [
+        record
+        for record, result in zip(records, results)
+        if "ErrorCode" in result
+    ]
+
+
+def error_sample(response: dict) -> str:
+    errors = [
+        result.get("ErrorCode", "UnknownError")
+        for result in response.get("Records", [])
+        if "ErrorCode" in result
+    ]
+    return ",".join(errors[:3])
+
+
 def publish_records(
     client,
     stream_name: str,
     records: list[dict],
     batch_size: int,
+    *,
+    max_attempts: int = 3,
+    retry_backoff_seconds: float = 1.0,
 ) -> None:
     for batch in batched(records, batch_size):
-        response = client.put_records(StreamName=stream_name, Records=batch)
-        failed_count = int(response.get("FailedRecordCount", 0))
-        if failed_count:
-            errors = [
-                result.get("ErrorCode", "UnknownError")
-                for result in response.get("Records", [])
-                if "ErrorCode" in result
-            ]
-            sample = ",".join(errors[:3])
-            raise RuntimeError(
-                f"Kinesis put_records failed for {failed_count} records: {sample}"
+        pending = batch
+        attempt = 1
+        while pending:
+            response = client.put_records(StreamName=stream_name, Records=pending)
+            failed_count = int(response.get("FailedRecordCount", 0))
+            if failed_count == 0:
+                break
+
+            failed = failed_records_from_response(pending, response)
+            sample = error_sample(response)
+            if not failed or attempt >= max_attempts:
+                raise RuntimeError(
+                    f"Kinesis put_records failed for {failed_count} records: {sample}"
+                )
+
+            LOGGER.warning(
+                "Retrying %s failed Kinesis records after attempt %s/%s: %s",
+                len(failed),
+                attempt,
+                max_attempts,
+                sample,
             )
+            time.sleep(retry_backoff_seconds * attempt)
+            pending = failed
+            attempt += 1
 
 
 def main() -> None:

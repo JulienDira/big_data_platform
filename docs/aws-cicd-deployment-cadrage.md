@@ -9,6 +9,7 @@ The target is simple:
 
 ```text
 push to main -> validate -> publish immutable artifacts -> terraform apply dev
+-> controlled runtime validation
 ```
 
 After the one-time AWS/GitHub bootstrap, no local deployment command should be
@@ -16,8 +17,8 @@ needed for normal fixes. A push to `main` must publish the producer image, Glue
 artifacts and Lambda package, then apply the prepared Terraform stacks for the
 controlled dev/POC environment.
 
-This cadrage does not implement the workflow and does not run AWS runtime
-validation.
+This document frames the deployment path and records its implementation status.
+Runtime proof still requires execution in a real AWS account.
 
 Implementation status on 2026-07-02:
 
@@ -27,6 +28,19 @@ Implementation status on 2026-07-02:
   `terraform init -backend=false` as the local static validation path;
 - runtime remains disabled by default: ECS desired count is `0`, Glue jobs are
   not started by the workflow, and the projection schedule stays disabled.
+
+Phase 10 implementation status on 2026-07-03:
+
+- the workflow pins third-party actions to full commit SHAs with source tag
+  comments;
+- OIDC permissions are job-scoped to the AWS deployment jobs;
+- the normal Terraform backend locking path uses S3 lockfiles with
+  `use_lockfile=true`; DynamoDB locking is no longer a required GitHub
+  Environment variable;
+- `infra/scripts/aws-runtime-validate.py` runs the controlled post-apply AWS
+  runtime checks and writes `build/aws-runtime-evidence.json`;
+- `infra/aws/README.md` documents one-time GitHub/AWS bootstrap, variables,
+  runtime proof, cleanup and cost control.
 
 ## References and standards used
 
@@ -90,7 +104,7 @@ The project needs one explicit bootstrap before push-based deployment can work:
 
 1. Create or apply an AWS bootstrap stack for:
    - Terraform state S3 bucket;
-   - Terraform state lock table or equivalent locking mechanism;
+   - S3 backend lockfile permissions for the matching `.tflock` objects;
    - GitHub OIDC IAM provider if it is not already present;
    - GitHub deploy IAM role scoped to this repository/environment;
    - artifact bucket used by CI for Glue and Lambda packages.
@@ -98,7 +112,8 @@ The project needs one explicit bootstrap before push-based deployment can work:
    - `AWS_REGION`;
    - `AWS_DEPLOY_ROLE_ARN`;
    - `AWS_ARTIFACT_BUCKET`;
-   - `TF_STATE_BUCKET`, `TF_STATE_LOCK_TABLE` and `TF_STATE_REGION`;
+   - `TF_STATE_BUCKET` and `TF_STATE_REGION`;
+   - `AWS_ACCOUNT_ID`;
    - `VPC_ID`;
    - `FARGATE_SUBNET_IDS` as a Terraform list expression, for example
      `["subnet-a","subnet-b"]`;
@@ -141,9 +156,17 @@ Recommended jobs:
    - apply `infra/aws/serving`, passing the Lambda S3 package key/hash and
      keeping `projection_schedule_enabled=false` before runtime;
    - print Terraform outputs needed by the later runtime phase.
+4. `runtime-validation`
+   - authenticate through the same OIDC deploy role;
+   - read Terraform outputs from the S3 backend;
+   - verify immutable ECR/S3 artifacts;
+   - run a bounded ECS/Kinesis/Glue/S3/Athena/DynamoDB/API/observability check;
+   - always attempt to scale ECS back to `0` and stop Raw Glue Streaming;
+   - write `build/aws-runtime-evidence.json`.
 
 The CI pipeline may run `terraform apply` for dev/POC only after bootstrap is
-complete. This is still deployment preparation, not global AWS runtime proof.
+complete. AWS runtime proof exists only when the runtime-validation job runs in
+a real AWS account and records successful evidence.
 
 ## Terraform and CI/CD boundary
 

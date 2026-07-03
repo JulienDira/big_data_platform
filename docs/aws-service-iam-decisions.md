@@ -27,7 +27,7 @@ Status values:
 | Medallion layers | Raw, Bronze, Silver, Gold, Serving | Fait on-prem, Prepare AWS core/lake/batch | On-prem chain is proven; AWS producer, Kinesis -> S3 Raw/Bronze/Silver and Gold batch paths are prepared statically. AWS runtime proof is missing. |
 | Daily volume reference | 263880 rows/day per main layer | Prepare | Captured as sizing context, not enforced by runtime tests yet. |
 | Budget | 50 EUR maximum for controlled POC | Prepare | `infra/aws/serving` declares an AWS Budget with 50%, 80% and 100% notification thresholds when an alert email is provided. AWS runtime proof is missing. |
-| Deployment | Terraform plus CI/CD | Prepare, CI/CD implemente statiquement | Terraform exists for core, batch and serving resources; `.github/workflows/aws-deploy.yml` prepares GitHub Actions OIDC, immutable ECR/S3 artifacts, Lambda Zip/S3 packaging and Terraform inputs. GitHub/AWS execution proof is still missing. |
+| Deployment | Terraform plus CI/CD | Prepare, CI/CD/runtime validation implemente statiquement | Terraform exists for core, batch and serving resources; `.github/workflows/aws-deploy.yml` uses job-scoped GitHub Actions OIDC, immutable ECR/S3 artifacts, Lambda Zip/S3 packaging, S3 backend lockfiles and a controlled runtime-validation job. GitHub/AWS execution proof is still missing. |
 
 ## Service decisions
 
@@ -87,7 +87,8 @@ scoped to the input/output prefixes they consume and produce.
 | Partition analytical datasets by date, symbol and interval | Prepare | Glue table projection uses `event_date`, `symbol`, `interval` where applicable. |
 | Use CloudWatch logs for Glue batch | Prepare | Log group and Glue continuous log arguments are declared. |
 | Apply least privilege IAM | Prepare | Glue batch policy is scoped to batch S3 prefixes, Glue Catalog and logs. |
-| Cadrer and implement CI/CD before AWS runtime validation | Prepare | `docs/aws-cicd-deployment-cadrage.md` defines the path and `.github/workflows/aws-deploy.yml` implements GitHub Actions OIDC, immutable artifact publication, Terraform/CI separation and the Zip/S3 Lambda default. GitHub/AWS execution proof is still missing. |
+| Cadrer and implement CI/CD before AWS runtime validation | Prepare | `docs/aws-cicd-deployment-cadrage.md` defines the path and `.github/workflows/aws-deploy.yml` implements GitHub Actions OIDC, immutable artifact publication, Terraform/CI separation, Zip/S3 Lambda packaging, S3 lockfile backend config and controlled runtime validation. GitHub/AWS execution proof is still missing. |
+| Verify AWS implementation step by step before deployment/runtime validation | Fait statiquement | `docs/aws-implementation-step-audit.md` verifies producer/core, Raw, Bronze/Silver, Gold/restitution, Serving/API/dashboard/observability and CI/CD in order. One Kinesis `PutRecords` partial-failure handling issue was corrected with tests. No AWS runtime or `terraform apply` was run. |
 | Validate AWS runtime on S3/Glue/Athena | Reporte | Blocked until AWS credentials and target account access are available. |
 | Configure AWS Budgets | Prepare | `infra/aws/serving` declares a 50 EUR monthly POC Budget with optional email notifications at 50%, 80% and 100%. AWS runtime proof is missing. |
 
@@ -101,16 +102,25 @@ the repo.
 The later restitution/API/observability scope is now statically implemented in
 `apps/aws-serving-api`, `apps/streamlit-dashboard` and `infra/aws/serving`.
 The static quality, standards and conformance audit is complete. The CI/CD and
-automated deployment preparation path is now implemented statically. The next
-phase should use the GitHub Actions path for AWS deployment preparation after
-the GitHub OIDC role, Terraform backend/locking and required Environment
-variables are bootstrapped.
+artifact publication path is implemented statically. The step-by-step static
+implementation verification is complete in
+`docs/aws-implementation-step-audit.md` and leaves no blocking static issue.
+
+The user-requested AWS automated deployment and runtime validation phase is now
+implemented statically in the repo: the workflow is hardened for job-scoped
+OIDC, action SHA pinning, S3 backend lockfiles, immutable artifacts and a
+post-apply runtime-validation script. Runtime validation still depends on real
+AWS/GitHub bootstrap and credentials.
+
+The normal deployment credential path must be GitHub Actions OIDC with a scoped
+AWS role, not long-lived AWS access keys or an administrator IAM user. If a
+temporary admin action is required for bootstrap, it must be documented as
+manual bootstrap only.
 
 AWS runtime validation should happen only after CI/CD publishes immutable
 producer, Glue and Lambda artifacts, Terraform consumes those versions, the
-dev/POC deployment preparation path is reproducible, and a real AWS account,
-credentials, callback URLs, alert email and deployment permissions are
-available.
+dev/POC deployment path is reproducible, and a real AWS account, credentials,
+callback URLs, alert email and deployment permissions are available.
 
 Runtime validation in AWS should happen only after the selected AWS path has
 been framed and implemented: producer/Kinesis/ECS, Kinesis -> S3
@@ -125,9 +135,10 @@ validated until checked in a real AWS account.
 
 The on-premise Silver -> Gold -> Serving path is proven on YARN, HDFS/Hive,
 PostgreSQL and Spark History. The AWS path is currently prepared and statically
-validated only. Before runtime validation, complete CI/CD artifact publication
-and automated deployment preparation. Do not mark AWS runtime validation
-complete until:
+validated only. Before marking AWS runtime validation complete, CI/CD artifact
+publication, step-by-step static implementation verification and the automated
+deployment path must be completed and checked in a real AWS account. Do not
+mark AWS runtime validation complete until:
 
 - CI/CD publishes the producer image, Glue artifacts and Lambda package with an
   immutable version.

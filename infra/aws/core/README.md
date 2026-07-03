@@ -46,9 +46,12 @@ configuration from the `dev` GitHub Environment:
 
 ```text
 TF_STATE_BUCKET
-TF_STATE_LOCK_TABLE
 TF_STATE_REGION
 ```
+
+The normal CI path uses Terraform S3 backend lockfiles with
+`use_lockfile=true`. DynamoDB state locking is not required for this project
+phase.
 
 ## Commands
 
