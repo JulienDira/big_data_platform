@@ -6,7 +6,9 @@ on:
       confirm_destroy:
         description: Type DESTROY to confirm teardown of the AWS deployment.
         required: true
-        type: string
+        type: choice
+        options:
+          - DESTROY
 
 permissions:
   contents: read
@@ -15,6 +17,10 @@ permissions:
 env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
+
+concurrency:
+  group: aws-dev-destroy
+  cancel-in-progress: false
 
 jobs:
   destroy:
