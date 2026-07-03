@@ -127,5 +127,6 @@ resource "aws_ecs_service" "producer" {
     aws_cloudwatch_log_group.producer,
     aws_iam_role_policy_attachment.ecs_task_execution,
     aws_iam_role_policy_attachment.ecs_task,
+    aws_iam_service_linked_role.ecs,
   ]
 }
