@@ -204,10 +204,10 @@ resource "aws_cloudwatch_event_target" "glue_job_failure_alerts" {
 }
 
 resource "aws_budgets_budget" "poc" {
-  name         = "${local.name_prefix}-poc-50-eur"
+  name         = "${local.name_prefix}-poc-50-usd"
   budget_type  = "COST"
   limit_amount = tostring(var.poc_budget_limit_eur)
-  limit_unit   = "EUR"
+  limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
   dynamic "notification" {

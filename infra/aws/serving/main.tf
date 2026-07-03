@@ -48,7 +48,6 @@ locals {
     ATHENA_OUTPUT_LOCATION       = var.athena_output_location
     ATHENA_QUERY_TIMEOUT_SECONDS = tostring(var.api_lambda_timeout_seconds - 5)
     ATHENA_WORKGROUP             = var.athena_workgroup_name
-    AWS_REGION                   = var.aws_region
     DYNAMODB_TABLE_NAME          = aws_dynamodb_table.latest_metrics.name
     HISTORY_DEFAULT_LIMIT        = tostring(var.history_default_limit)
     HISTORY_MAX_LIMIT            = tostring(var.history_max_limit)
