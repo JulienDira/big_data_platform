@@ -68,6 +68,29 @@ jobs:
             exit 1
           fi
 
+      - name: Collect destroy inputs from existing stacks
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/aws/batch init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/batch.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="use_lockfile=true"
+          echo "SILVER_GLUE_JOB_NAME=$(terraform -chdir=infra/aws/batch output -raw silver_glue_job_name)" >> "${GITHUB_ENV}"
+          echo "GOLD_GLUE_JOB_NAME=$(terraform -chdir=infra/aws/batch output -raw gold_glue_job_name)" >> "${GITHUB_ENV}"
+          echo "LAKE_BUCKET_NAME=$(terraform -chdir=infra/aws/batch output -raw lake_bucket_name)" >> "${GITHUB_ENV}"
+          echo "ATHENA_RESULTS_BUCKET_NAME=$(terraform -chdir=infra/aws/batch output -raw athena_results_bucket_name)" >> "${GITHUB_ENV}"
+          echo "ATHENA_OUTPUT_LOCATION=$(terraform -chdir=infra/aws/batch output -raw athena_output_location)" >> "${GITHUB_ENV}"
+          echo "ATHENA_WORKGROUP_NAME=$(terraform -chdir=infra/aws/batch output -raw athena_workgroup_name)" >> "${GITHUB_ENV}"
+
+          terraform -chdir=infra/aws/serving init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/serving.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="use_lockfile=true"
+          echo "LATEST_PROJECTION_LAMBDA_ARN=$(terraform -chdir=infra/aws/serving output -raw latest_projection_lambda_arn)" >> "${GITHUB_ENV}"
+
       - name: Destroy orchestration stack
         shell: bash
         run: |
@@ -79,9 +102,9 @@ jobs:
             -backend-config="use_lockfile=true"
           terraform -chdir=infra/aws/orchestration destroy -auto-approve -input=false \
             -var="aws_region=${AWS_REGION}" \
-            -var="silver_glue_job_name=placeholder" \
-            -var="gold_glue_job_name=placeholder" \
-            -var="latest_projection_lambda_arn=arn:aws:lambda:${AWS_REGION}:000000000000:function:placeholder"
+            -var="silver_glue_job_name=${SILVER_GLUE_JOB_NAME}" \
+            -var="gold_glue_job_name=${GOLD_GLUE_JOB_NAME}" \
+            -var="latest_projection_lambda_arn=${LATEST_PROJECTION_LAMBDA_ARN}"
 
       - name: Destroy serving stack
         shell: bash
@@ -94,10 +117,22 @@ jobs:
             -backend-config="use_lockfile=true"
           terraform -chdir=infra/aws/serving destroy -auto-approve -input=false \
             -var="aws_region=${AWS_REGION}" \
-            -var="lake_bucket_name=placeholder" \
-            -var="athena_results_bucket_name=placeholder" \
-            -var="athena_output_location=s3://placeholder/athena-results/" \
-            -var="athena_workgroup_name=placeholder"
+            -var="lake_bucket_name=${LAKE_BUCKET_NAME}" \
+            -var="athena_results_bucket_name=${ATHENA_RESULTS_BUCKET_NAME}" \
+            -var="athena_output_location=${ATHENA_OUTPUT_LOCATION}" \
+            -var="athena_workgroup_name=${ATHENA_WORKGROUP_NAME}"
+
+      - name: Read core stack outputs for batch destroy
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/aws/core init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/core.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="use_lockfile=true"
+          echo "KINESIS_STREAM_NAME=$(terraform -chdir=infra/aws/core output -raw kinesis_stream_name)" >> "${GITHUB_ENV}"
+          echo "KINESIS_STREAM_ARN=$(terraform -chdir=infra/aws/core output -raw kinesis_stream_arn)" >> "${GITHUB_ENV}"
 
       - name: Destroy batch stack
         shell: bash
@@ -110,8 +145,9 @@ jobs:
             -backend-config="use_lockfile=true"
           terraform -chdir=infra/aws/batch destroy -auto-approve -input=false \
             -var="aws_region=${AWS_REGION}" \
-            -var="market_candles_stream_name=placeholder" \
-            -var="market_candles_stream_arn=arn:aws:kinesis:${AWS_REGION}:000000000000:stream/placeholder"
+            -var="market_candles_stream_name=${KINESIS_STREAM_NAME}" \
+            -var="market_candles_stream_arn=${KINESIS_STREAM_ARN}" \
+            -var="force_destroy_buckets=true"
 
       - name: Destroy core stack
         shell: bash
