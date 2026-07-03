@@ -3,7 +3,7 @@ name: AWS Deploy
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, multi-deployment]
   workflow_dispatch:
 
 permissions:
