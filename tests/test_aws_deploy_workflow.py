@@ -28,7 +28,8 @@ class AwsDeployWorkflowTest(unittest.TestCase):
     def test_pull_requests_validate_without_publication_apply_or_runtime(self):
         self.assertIn("pull_request:", self.source)
         self.assertIn("push:", self.source)
-        self.assertIn("branches: [main]", self.source)
+        # Pull request validation should run for the main branch and any allowed deployment branches.
+        self.assertRegex(self.source, r"branches:\s*\[main(?:,\s*multi-deployment)?\]")
         self.assertIn("workflow_dispatch:", self.source)
         self.assertEqual(3, self.source.count("if: github.event_name != 'pull_request'"))
 
