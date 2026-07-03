@@ -34,11 +34,6 @@ variable "batch_pipeline_schedule_expression" {
   default     = "rate(1 minute)"
 }
 
-variable "bronze_glue_job_name" {
-  description = "Glue job name for Raw S3 to Bronze S3."
-  type        = string
-}
-
 variable "silver_glue_job_name" {
   description = "Glue job name for Bronze S3 to Silver S3."
   type        = string

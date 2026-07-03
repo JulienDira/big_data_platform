@@ -27,7 +27,7 @@ locals {
   ecs_service_name           = coalesce(var.ecs_service_name, "${local.name_prefix}-binance-producer")
   default_glue_job_names = [
     "${local.name_prefix}-raw-market-candles-streaming",
-    "${local.name_prefix}-bronze-market-candles-batch",
+    "${local.name_prefix}-bronze-market-candles-streaming",
     "${local.name_prefix}-silver-market-candles-batch",
     "${local.name_prefix}-gold-indicators-batch",
   ]

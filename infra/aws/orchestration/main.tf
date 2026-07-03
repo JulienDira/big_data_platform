@@ -54,7 +54,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
 
   definition = jsonencode({
     QueryLanguage = "JSONata"
-    Comment       = "Run Bronze, Silver, Gold and latest projection in order with a DynamoDB single-flight lock."
+    Comment       = "Run Silver, Gold and latest projection in order with a DynamoDB single-flight lock."
     StartAt       = "AcquireLock"
     States = {
       AcquireLock = {
@@ -83,7 +83,7 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
             }
           }
         }
-        Next = "RunBronze"
+        Next = "RunSilver"
         Catch = [
           {
             ErrorEquals = ["DynamoDB.ConditionalCheckFailedException"]
@@ -97,20 +97,6 @@ resource "aws_sfn_state_machine" "batch_pipeline" {
       }
       AlreadyRunning = {
         Type = "Succeed"
-      }
-      RunBronze = {
-        Type     = "Task"
-        Resource = "arn:${data.aws_partition.current.partition}:states:::glue:startJobRun.sync"
-        Arguments = {
-          JobName = var.bronze_glue_job_name
-        }
-        Next = "RunSilver"
-        Catch = [
-          {
-            ErrorEquals = ["States.ALL"]
-            Next        = "ReleaseLockAfterFailure"
-          },
-        ]
       }
       RunSilver = {
         Type     = "Task"

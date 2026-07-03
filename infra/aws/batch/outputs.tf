@@ -54,8 +54,8 @@ output "glue_job_name" {
 }
 
 output "bronze_glue_job_name" {
-  description = "Glue Spark batch job name for Raw S3 to Bronze S3."
-  value       = aws_glue_job.bronze_market_candles_batch.name
+  description = "Glue Streaming job name for Raw S3 to Bronze S3."
+  value       = aws_glue_job.bronze_market_candles_streaming.name
 }
 
 output "silver_glue_job_name" {
@@ -71,9 +71,9 @@ output "gold_glue_job_name" {
 output "lake_ingestion_glue_job_names" {
   description = "Glue job names for Raw, Bronze and Silver lake ingestion."
   value = {
-    raw_streaming = aws_glue_job.raw_market_candles_streaming.name
-    bronze_batch  = aws_glue_job.bronze_market_candles_batch.name
-    silver_batch  = aws_glue_job.silver_market_candles_batch.name
+    raw_streaming    = aws_glue_job.raw_market_candles_streaming.name
+    bronze_streaming = aws_glue_job.bronze_market_candles_streaming.name
+    silver_batch     = aws_glue_job.silver_market_candles_batch.name
   }
 }
 

@@ -272,7 +272,6 @@ jobs:
           echo "athena_results_bucket_name=$(terraform -chdir=infra/aws/batch output -raw athena_results_bucket_name)" >> "${GITHUB_OUTPUT}"
           echo "athena_workgroup_name=$(terraform -chdir=infra/aws/batch output -raw athena_workgroup_name)" >> "${GITHUB_OUTPUT}"
           echo "athena_output_location=$(terraform -chdir=infra/aws/batch output -raw athena_output_location)" >> "${GITHUB_OUTPUT}"
-          echo "bronze_glue_job_name=$(terraform -chdir=infra/aws/batch output -raw bronze_glue_job_name)" >> "${GITHUB_OUTPUT}"
           echo "silver_glue_job_name=$(terraform -chdir=infra/aws/batch output -raw silver_glue_job_name)" >> "${GITHUB_OUTPUT}"
           echo "gold_glue_job_name=$(terraform -chdir=infra/aws/batch output -raw gold_glue_job_name)" >> "${GITHUB_OUTPUT}"
 
@@ -322,7 +321,6 @@ jobs:
 
           terraform -chdir=infra/aws/orchestration apply -auto-approve -input=false \
             -var="aws_region=${AWS_REGION}" \
-            -var="bronze_glue_job_name=${{ steps.batch.outputs.bronze_glue_job_name }}" \
             -var="silver_glue_job_name=${{ steps.batch.outputs.silver_glue_job_name }}" \
             -var="gold_glue_job_name=${{ steps.batch.outputs.gold_glue_job_name }}" \
             -var="latest_projection_lambda_arn=${{ steps.serving.outputs.latest_projection_lambda_arn }}" \

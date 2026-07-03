@@ -25,7 +25,7 @@ class FakeRunner:
 
 
 class AwsRuntimeValidationTest(unittest.TestCase):
-    def test_cleanup_scales_down_ecs_and_stops_raw_streaming(self):
+    def test_cleanup_scales_down_ecs_and_stops_raw_and_bronze_streaming(self):
         runner = FakeRunner()
         validator = MODULE.RuntimeValidator(
             repo_root=ROOT,
@@ -38,6 +38,8 @@ class AwsRuntimeValidationTest(unittest.TestCase):
         validator.ecs_service_name = "service"
         validator.raw_streaming_job_name = "raw-job"
         validator.raw_streaming_run_id = "raw-run"
+        validator.bronze_streaming_job_name = "bronze-job"
+        validator.bronze_streaming_run_id = "bronze-run"
 
         validator.cleanup()
 
@@ -50,9 +52,51 @@ class AwsRuntimeValidationTest(unittest.TestCase):
             "aws glue batch-stop-job-run --job-name raw-job --job-run-ids raw-run",
             commands,
         )
+        self.assertIn(
+            "aws glue batch-stop-job-run --job-name bronze-job --job-run-ids bronze-run",
+            commands,
+        )
         self.assertEqual(
-            ["ecs_desired_count_zero", "raw_streaming_stopped"],
+            [
+                "ecs_desired_count_zero",
+                "raw_streaming_stopped",
+                "bronze_streaming_stopped",
+            ],
             [item["name"] for item in validator.evidence["cleanup"]],
+        )
+
+    def test_run_lake_jobs_starts_silver_and_gold_only(self):
+        runner = FakeRunner()
+        validator = MODULE.RuntimeValidator(
+            repo_root=ROOT,
+            artifact_version="abc123",
+            evidence_path=ROOT / "build/test-evidence.json",
+            runner=runner,
+            sleeper=lambda seconds: None,
+        )
+        validator.batch_outputs = {
+            "lake_ingestion_glue_job_names": {
+                "bronze_streaming": "bronze-job",
+                "silver_batch": "silver-job",
+            },
+            "glue_job_name": "gold-job",
+        }
+
+        with patch.object(validator, "wait_for_glue_job"):
+            validator.run_lake_jobs()
+
+        commands = [" ".join(args) for args, _kwargs in runner.commands]
+        self.assertNotIn(
+            "aws glue start-job-run --job-name bronze-job --query JobRunId --output text",
+            commands,
+        )
+        self.assertIn(
+            "aws glue start-job-run --job-name silver-job --query JobRunId --output text",
+            commands,
+        )
+        self.assertIn(
+            "aws glue start-job-run --job-name gold-job --query JobRunId --output text",
+            commands,
         )
 
     def test_dry_run_writes_evidence_without_subprocess_calls(self):

@@ -34,19 +34,21 @@ Out of scope for this phase and the next implementation phase:
 
 ## Execution choice
 
-Decision: use a minimal Glue/Spark lake path:
+Decision updated after the Bronze streaming refactor: use a minimal Glue/Spark
+lake path with Raw and Bronze streaming, while keeping Silver deterministic as
+batch:
 
 1. Glue Streaming ETL captures Kinesis records into Raw S3.
-2. Glue Spark batch rebuilds Bronze from Raw S3.
+2. Glue Streaming ETL decodes Raw S3 into Bronze S3 and rejected S3.
 3. Glue Spark batch rebuilds Silver from Bronze S3.
 4. The existing `jobs/gold-indicators/aws.py` continues to read Silver S3.
 
-This is preferred over a full always-on streaming chain for Raw, Bronze and
-Silver because it is simpler for the POC, cheaper to run in controlled demo
-windows, and keeps Silver deterministic. Silver currently performs quality
-filtering and deduplication by `(symbol, interval, open_time)` with the latest
-`ingested_at`; doing that as append-only streaming Parquet would add state and
-update complexity without a demonstrated need.
+This keeps Raw as the replayable audit boundary and moves the first technical
+decode/reject step closer to ingestion. Silver remains batch because it applies
+closed-candle quality filtering and deduplication by
+`(symbol, interval, open_time)` with the latest `ingested_at`; doing that as
+append-only streaming Parquet would add state and update complexity without a
+demonstrated need.
 
 The next implementation should therefore add AWS entry points in the existing
 logical job folders:
@@ -140,7 +142,8 @@ rejected S3 area.
 
 ### Input and output
 
-Bronze AWS reads Raw S3 and writes decoded Bronze S3.
+Bronze AWS reads Raw S3 as a Glue Streaming file source and writes decoded
+Bronze S3.
 
 Default prefix to add:
 
@@ -154,8 +157,8 @@ Rejected records should be written to a separate Parquet prefix:
 rejected/bronze/market_candles
 ```
 
-The implementation should use Glue Spark batch for the first POC. This keeps
-replay simple: a fixed Raw capture window can rebuild Bronze deterministically.
+The implementation uses Glue Streaming with explicit checkpoints. Replay still
+starts from Raw S3 by using a fresh or dedicated Bronze checkpoint.
 
 ### Decoding
 
@@ -316,7 +319,7 @@ Resources to add or frame there:
 - Raw streaming checkpoint prefix;
 - Glue scripts/artifacts for Raw, Bronze and Silver entry points;
 - Glue Streaming job for Kinesis -> Raw;
-- Glue batch job for Raw -> Bronze;
+- Glue Streaming job for Raw -> Bronze;
 - Glue batch job for Bronze -> Silver;
 - optional Glue Catalog tables for Raw and Bronze if they help inspection;
 - CloudWatch log groups for lake ingestion jobs.

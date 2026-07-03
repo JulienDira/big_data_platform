@@ -150,18 +150,18 @@ Pushes to `main` and manual `workflow_dispatch` run:
 ```text
 EventBridge Scheduler rate(1 minute)
 -> Step Functions
--> Glue Bronze batch
 -> Glue Silver batch
 -> Glue Gold/trading_gold batch
 -> latest projection Lambda
 -> DynamoDB latest metrics
 ```
 
-The Step Functions workflow uses a DynamoDB conditional lock so a one-minute
-trigger does not overlap a previous batch run. The schedule is deployed with
-`batch_pipeline_schedule_enabled=false` by default. Enable it only after the
-AWS bootstrap, deployment and controlled runtime validation prove the pipeline
-can run safely.
+Raw and Bronze are long-running Glue Streaming jobs. The Step Functions
+workflow uses a DynamoDB conditional lock so a one-minute trigger does not
+overlap a previous Silver -> Gold -> projection batch run. The schedule is
+deployed with `batch_pipeline_schedule_enabled=false` by default. Enable it
+only after the AWS bootstrap, deployment and controlled runtime validation
+prove the pipeline can run safely.
 
 ## Runtime proof checks
 
@@ -173,8 +173,9 @@ The runtime validation script checks:
 - ECS producer can scale to one task, reach stability, publish briefly, then
   scale back to zero.
 - Raw, Bronze, Silver, Gold and `trading_gold` S3 prefixes contain objects.
-- Bronze, Silver and Gold Glue jobs finish with `SUCCEEDED`.
-- Step Functions runs Bronze, Silver, Gold and latest projection in order.
+- Bronze streaming writes decoded Bronze records.
+- Silver and Gold Glue batch jobs finish with `SUCCEEDED`.
+- Step Functions runs Silver, Gold and latest projection in order.
 - EventBridge Scheduler can trigger the state machine when explicitly enabled.
 - Athena count queries on `trading_gold.market_indicators` and
   `trading_gold.market_indicators_latest` return rows.

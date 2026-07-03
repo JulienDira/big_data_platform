@@ -20,18 +20,17 @@ class AwsOrchestrationTest(unittest.TestCase):
         self.assertIn('resource "aws_sfn_state_machine" "batch_pipeline"', self.main_source)
         self.assertIn('QueryLanguage = "JSONata"', self.main_source)
         self.assertNotIn("ResultPath", self.main_source)
+        self.assertNotIn("RunBronze", self.main_source)
+        self.assertNotIn("var.bronze_glue_job_name", self.main_source)
 
-        bronze_index = self.main_source.index("RunBronze")
         silver_index = self.main_source.index("RunSilver")
         gold_index = self.main_source.index("RunGold")
         projection_index = self.main_source.index("RunLatestProjection")
 
-        self.assertLess(bronze_index, silver_index)
         self.assertLess(silver_index, gold_index)
         self.assertLess(gold_index, projection_index)
 
         self.assertIn("glue:startJobRun.sync", self.main_source)
-        self.assertIn("JobName = var.bronze_glue_job_name", self.main_source)
         self.assertIn("JobName = var.silver_glue_job_name", self.main_source)
         self.assertIn("JobName = var.gold_glue_job_name", self.main_source)
         self.assertIn("lambda:invoke", self.main_source)
@@ -77,6 +76,7 @@ class AwsOrchestrationTest(unittest.TestCase):
         )
         self.assertIn('output "latest_projection_lambda_arn"', serving_outputs)
         self.assertIn('output "bronze_glue_job_name"', batch_outputs)
+        self.assertIn("bronze_streaming", batch_outputs)
         self.assertIn('output "silver_glue_job_name"', batch_outputs)
         self.assertIn('output "gold_glue_job_name"', batch_outputs)
 
@@ -86,6 +86,7 @@ class AwsOrchestrationTest(unittest.TestCase):
         self.assertIn("-chdir=infra/aws/orchestration", self.workflow_source)
         self.assertIn('-var="batch_pipeline_schedule_enabled=false"', self.workflow_source)
         self.assertIn("latest_projection_lambda_arn", self.workflow_source)
+        self.assertNotIn("bronze_glue_job_name=${{ steps.batch.outputs", self.workflow_source)
 
         serving_index = self.workflow_source.index(
             "Apply serving stack from immutable Lambda package"

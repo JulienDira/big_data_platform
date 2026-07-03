@@ -38,8 +38,8 @@ Status values:
 | Long-running WebSocket producer | ECS Fargate, with EC2 as FinOps alternative | Prepare | `infra/aws/core` declares ECR, ECS/Fargate, IAM and logs for one configured producer service. EC2 remains only a documented FinOps alternative. |
 | Batch ingestion | Lambda with EventBridge Scheduler | Reporte, a cadrer later | Periodic REST ingestion can be reconsidered later. The immediate missing ingestion scope is Kinesis -> S3 Raw/Bronze/Silver, not a separate Lambda batch path. |
 | Batch processing | AWS Glue Spark batch | Prepare | `infra/aws/batch` creates a Glue Spark job for `jobs/gold-indicators/aws.py`; runtime AWS proof is missing. |
-| Batch orchestration | EventBridge Scheduler plus Step Functions | Prepare | `infra/aws/orchestration` prepares a disabled-by-default `rate(1 minute)` schedule, a Step Functions chain Bronze -> Silver -> Gold -> latest projection and a DynamoDB conditional lock. AWS runtime proof is missing. |
-| Streaming processing | Glue Streaming ETL for Raw capture, Glue Spark batch for Bronze/Silver | Prepare | `infra/aws/batch` declares Glue jobs for Avro Kinesis -> Raw S3, Raw -> Bronze and Bronze -> Silver. AWS Glue execution is not proven. |
+| Batch orchestration | EventBridge Scheduler plus Step Functions | Prepare | `infra/aws/orchestration` prepares a disabled-by-default `rate(1 minute)` schedule, a Step Functions chain Silver -> Gold -> latest projection and a DynamoDB conditional lock. AWS runtime proof is missing. |
+| Streaming processing | Glue Streaming ETL for Raw capture and Bronze decode, Glue Spark batch for Silver | Prepare | `infra/aws/batch` declares Glue Streaming jobs for Avro Kinesis -> Raw S3 and Raw -> Bronze, plus a Glue batch job for Bronze -> Silver. AWS Glue execution is not proven. |
 | Storage | S3 with partitioned Parquet for Raw/Bronze/Silver/Gold | Prepare | Terraform creates S3 lake paths for Raw, Bronze, rejected, Silver, Gold and `trading_gold`. S3 runtime writes are not proven. |
 | Catalog | AWS Glue Data Catalog | Prepare | Terraform declares Raw, Bronze, Silver, Gold and `trading_gold` databases/tables. |
 | Analytics SQL | Athena on cataloged S3 tables | Prepare | Terraform declares an Athena workgroup/output location; query execution is not proven. |
@@ -60,7 +60,7 @@ project scope.
 | `ecs-binance-producer-role` | Write Kinesis, write CloudWatch logs | Prepare | `infra/aws/core` declares a task role scoped to the configured Kinesis stream and an execution role scoped to ECR image pull plus producer logs. AWS runtime proof is missing. |
 | `lambda-batch-ingestion-role` | Write S3 Raw/Bronze, write CloudWatch logs | Reporte, a cadrer later | Not the next phase. Reconsider only after the Kinesis -> S3 lake ingestion path is designed. |
 | `glue-raw-streaming-role` | Read Kinesis, write Raw S3, write Raw checkpoint/temp prefixes and logs | Prepare | Terraform declares the dedicated Raw streaming role and policy. AWS role execution is not proven. |
-| `glue-lake-transform-role` | Read Raw/Bronze S3, write Bronze/Silver/rejected S3, Glue Catalog and logs | Prepare | Terraform declares the dedicated Bronze/Silver transform role and policy. It must not write Gold, `trading_gold`, DynamoDB, API resources or PostgreSQL. |
+| `glue-lake-transform-role` | Read Raw/Bronze S3, write Bronze/Silver/rejected S3, Bronze checkpoints, Glue Catalog and logs | Prepare | Terraform declares the dedicated Bronze/Silver transform role and policy. It must not write Gold, `trading_gold`, DynamoDB, API resources or PostgreSQL. |
 | `glue-batch-role` | Read/write required S3 prefixes, Glue Catalog, logs | Prepare | Terraform creates `${project}-${env}-glue-batch-role` with prefix-scoped S3 access. |
 | `batch-pipeline-sfn-role` | Start/read Glue batch jobs, invoke latest projection Lambda, manage the DynamoDB orchestration lock, write Step Functions logs | Prepare | `infra/aws/orchestration` declares the Step Functions execution role. Runtime execution is not proven. |
 | `batch-pipeline-scheduler-role` | Start the batch pipeline Step Functions state machine | Prepare | `infra/aws/orchestration` declares the EventBridge Scheduler target role. The schedule is disabled by default. |
@@ -89,7 +89,7 @@ scoped to the input/output prefixes they consume and produce.
 | Restitution tables are `trading_gold.*` on AWS | Prepare | Terraform declares Glue tables and the AWS job writes Parquet paths. |
 | Partition analytical datasets by date, symbol and interval | Prepare | Glue table projection uses `event_date`, `symbol`, `interval` where applicable. |
 | Use CloudWatch logs for Glue batch | Prepare | Log group and Glue continuous log arguments are declared. |
-| Schedule the AWS batch chain after Raw | Prepare | EventBridge Scheduler and Step Functions are declared statically with a disabled default schedule and a DynamoDB single-flight lock. AWS runtime proof is missing. |
+| Schedule the AWS batch chain after Bronze | Prepare | EventBridge Scheduler and Step Functions are declared statically with a disabled default schedule and a DynamoDB single-flight lock for Silver -> Gold -> latest projection. AWS runtime proof is missing. |
 | Apply least privilege IAM | Prepare | Glue batch policy is scoped to batch S3 prefixes, Glue Catalog and logs. |
 | Cadrer and implement CI/CD before AWS runtime validation | Prepare | `docs/aws-cicd-deployment-cadrage.md` defines the path and `.github/workflows/aws-deploy.yml` implements GitHub Actions OIDC, immutable artifact publication, Terraform/CI separation, Zip/S3 Lambda packaging, S3 lockfile backend config and controlled runtime validation. GitHub/AWS execution proof is still missing. |
 | Verify AWS implementation step by step before deployment/runtime validation | Fait statiquement | `docs/aws-implementation-step-audit.md` verifies producer/core, Raw, Bronze/Silver, Gold/restitution, Serving/API/dashboard/observability and CI/CD in order. One Kinesis `PutRecords` partial-failure handling issue was corrected with tests. No AWS runtime or `terraform apply` was run. |
@@ -118,8 +118,10 @@ AWS/GitHub bootstrap and credentials.
 
 The scheduled batch orchestration phase is also implemented statically:
 `infra/aws/orchestration` declares EventBridge Scheduler, Step Functions, a
-DynamoDB conditional lock and the Step Functions/Scheduler IAM roles. The
-schedule remains disabled by default until a controlled AWS runtime window.
+DynamoDB conditional lock and the Step Functions/Scheduler IAM roles for
+Silver -> Gold -> latest projection. Raw and Bronze stay as Glue Streaming
+jobs. The schedule remains disabled by default until a controlled AWS runtime
+window.
 
 The normal deployment credential path must be GitHub Actions OIDC with a scoped
 AWS role, not long-lived AWS access keys or an administrator IAM user. If a
@@ -155,11 +157,11 @@ mark AWS runtime validation complete until:
 - Terraform consumes those immutable versions through explicit inputs.
 - Terraform plan/apply succeeds in the target AWS account.
 - The producer/ECS/Kinesis path is deployed and sends records.
-- Kinesis -> S3 Raw/Bronze/Silver ingestion is deployed and checked in AWS.
+- Kinesis -> S3 Raw and Raw -> Bronze streaming ingestion are deployed and checked in AWS.
 - Silver Parquet input exists in S3.
 - The Glue batch job runs successfully.
 - Gold and `trading_gold` Parquet outputs are visible in S3.
-- Step Functions runs Bronze, Silver, Gold and latest projection in order.
+- Step Functions runs Silver, Gold and latest projection in order.
 - EventBridge Scheduler triggers the state machine only in a controlled window.
 - Glue Data Catalog tables are visible.
 - At least one Athena query succeeds.

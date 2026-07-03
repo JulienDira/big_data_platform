@@ -15,29 +15,60 @@ from utils.bronze import (
     build_bronze_valid,
     decode_avro_payload,
 )
-from utils.s3_io import write_parquet_dataset
+from utils.market_schema import AWS_RAW_MARKET_CANDLES_SCHEMA
+from utils.s3_io import write_parquet_stream
 
 
 def main() -> None:
     raw_input_path = option("RAW_INPUT_PATH")
     bronze_output_path = option("BRONZE_OUTPUT_PATH")
     rejected_output_path = option("BRONZE_REJECTED_OUTPUT_PATH")
+    bronze_checkpoint_path = option("BRONZE_CHECKPOINT_PATH")
+    rejected_checkpoint_path = option("BRONZE_REJECTED_CHECKPOINT_PATH")
     contract_path = option("CONTRACT_PATH")
-    write_mode = optional_option("WRITE_MODE", "overwrite")
+    max_files_per_trigger = optional_option("BRONZE_MAX_FILES_PER_TRIGGER", "100")
+    trigger_interval = optional_option("BRONZE_TRIGGER_INTERVAL", "30 seconds")
+    watermark_delay = optional_option("BRONZE_WATERMARK_DELAY", "2 days")
 
     spark = SparkSession.builder.appName("bronze-market-candles-aws").getOrCreate()
     spark.sparkContext.setLogLevel(os.getenv("SPARK_LOG_LEVEL", "WARN"))
 
     schema = Path(contract_path).read_text(encoding="utf-8")
-    raw = spark.read.format("parquet").load(raw_input_path)
+    raw = (
+        spark.readStream.schema(AWS_RAW_MARKET_CANDLES_SCHEMA)
+        .format("parquet")
+        .option("basePath", raw_input_path)
+        .option("maxFilesPerTrigger", max_files_per_trigger)
+        .load(raw_input_path)
+    )
     decoded = decode_avro_payload(raw, schema, value_column="value")
 
-    bronze = build_bronze_valid(decoded)
+    bronze = build_bronze_valid(decoded, watermark_delay=watermark_delay)
     rejected = build_bronze_rejected(decoded)
 
-    write_parquet_dataset(bronze, bronze_output_path, BRONZE_PARTITIONS, write_mode)
-    write_parquet_dataset(rejected, rejected_output_path, (), write_mode)
-    spark.stop()
+    bronze_query = write_parquet_stream(
+        bronze,
+        bronze_output_path,
+        bronze_checkpoint_path,
+        BRONZE_PARTITIONS,
+        trigger_interval,
+        "bronze_market_candles_aws",
+    )
+    rejected_query = write_parquet_stream(
+        rejected,
+        rejected_output_path,
+        rejected_checkpoint_path,
+        (),
+        trigger_interval,
+        "bronze_market_candles_aws_rejected",
+    )
+
+    try:
+        spark.streams.awaitAnyTermination()
+    finally:
+        bronze_query.stop()
+        rejected_query.stop()
+        spark.stop()
 
 
 if __name__ == "__main__":

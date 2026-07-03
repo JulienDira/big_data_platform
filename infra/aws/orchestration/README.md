@@ -16,15 +16,15 @@ Runtime flow:
 EventBridge Scheduler rate(1 minute)
 -> Step Functions
 -> DynamoDB conditional lock
--> Glue Bronze batch
 -> Glue Silver batch
 -> Glue Gold/trading_gold batch
 -> latest projection Lambda
 -> DynamoDB latest metrics
 ```
 
-`Kinesis -> Raw S3` remains the Glue Streaming path declared in
-`infra/aws/batch`.
+`Kinesis -> Raw S3` and `Raw S3 -> Bronze S3` remain Glue Streaming paths
+declared in `infra/aws/batch`. This state machine starts only the bounded batch
+steps after Bronze has been materialized.
 
 The schedule is disabled by default. Keep
 `batch_pipeline_schedule_enabled = false` until the AWS bootstrap, deployment

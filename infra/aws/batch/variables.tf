@@ -170,6 +170,12 @@ variable "raw_checkpoint_prefix" {
   default     = "checkpoints/raw/binance/market_candles"
 }
 
+variable "bronze_checkpoint_prefix" {
+  description = "S3 prefix for the Bronze Glue Streaming checkpoints."
+  type        = string
+  default     = "checkpoints/bronze/market_candles"
+}
+
 variable "kinesis_starting_position" {
   description = "Starting position used by the Raw Glue Streaming job."
   type        = string
@@ -180,6 +186,24 @@ variable "raw_trigger_interval" {
   description = "Processing trigger interval for the Raw Glue Streaming job."
   type        = string
   default     = "30 seconds"
+}
+
+variable "bronze_trigger_interval" {
+  description = "Processing trigger interval for the Bronze Glue Streaming job."
+  type        = string
+  default     = "30 seconds"
+}
+
+variable "bronze_watermark_delay" {
+  description = "Watermark delay used for Bronze streaming event-id deduplication."
+  type        = string
+  default     = "2 days"
+}
+
+variable "bronze_max_files_per_trigger" {
+  description = "Maximum number of new Raw files processed by Bronze per micro-batch."
+  type        = number
+  default     = 100
 }
 
 variable "glue_version" {

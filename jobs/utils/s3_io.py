@@ -16,3 +16,26 @@ def write_parquet_dataset(
     if partition_columns:
         writer = writer.partitionBy(*partition_columns)
     writer.save(path)
+
+
+def write_parquet_stream(
+    frame: DataFrame,
+    path: str,
+    checkpoint_path: str,
+    partition_columns: tuple[str, ...] = (),
+    trigger_interval: str | None = None,
+    query_name: str | None = None,
+):
+    writer = (
+        frame.writeStream.format("parquet")
+        .outputMode("append")
+        .option("path", path)
+        .option("checkpointLocation", checkpoint_path)
+    )
+    if partition_columns:
+        writer = writer.partitionBy(*partition_columns)
+    if trigger_interval:
+        writer = writer.trigger(processingTime=trigger_interval)
+    if query_name:
+        writer = writer.queryName(query_name)
+    return writer.start()

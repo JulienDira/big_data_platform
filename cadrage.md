@@ -24,12 +24,12 @@ cible AWS dans ce cadrage. Cote AWS, les restitutions actuellement publiees en
 Serving PostgreSQL doivent etre materialisees en tables Gold enrichies sur S3,
 cataloguees dans Glue Data Catalog et requetables via Athena.
 
-La chaine batch AWS apres Raw est orchestree par EventBridge Scheduler et Step
-Functions: Raw reste alimente par Glue Streaming depuis Kinesis, puis Step
-Functions lance les jobs Glue Bronze, Silver et Gold dans l'ordre avant
-d'appeler la projection latest metrics vers DynamoDB. Le schedule POC cible
-`rate(1 minute)`, mais il reste desactive par defaut tant que le runtime AWS
-n'est pas prouve.
+La chaine AWS apres Kinesis garde Raw et Bronze en Glue Streaming: Raw capture
+l'enveloppe Kinesis sur S3, puis Bronze lit Raw S3 en streaming pour produire
+Bronze et les rejets techniques. EventBridge Scheduler et Step Functions
+orchestrent ensuite les traitements batch Silver, Gold et la projection latest
+metrics vers DynamoDB. Le schedule POC cible `rate(1 minute)`, mais il reste
+desactive par defaut tant que le runtime AWS n'est pas prouve.
 
 Le document brut `Cahier des charges.docx` reste la source fonctionnelle
 initiale. La synthese consultable et versionnable pour les choix de services
@@ -246,7 +246,7 @@ Ordre recommande:
 11. Phase d'orchestration batch planifiee AWS:
    - creer un stack Terraform dedie pour EventBridge Scheduler, Step
      Functions et le verrou DynamoDB de la chaine batch;
-   - garder Raw en Glue Streaming et orchestrer Bronze, Silver, Gold puis la
+   - garder Raw et Bronze en Glue Streaming et orchestrer Silver, Gold puis la
      projection latest metrics;
    - utiliser `rate(1 minute)` comme cadence POC, avec schedule desactive par
      defaut;
@@ -309,10 +309,11 @@ volontairement simple:
 5. ecrire chaque table en Parquet sur S3;
 6. laisser Glue Data Catalog et Athena exposer les donnees.
 
-Le job Raw AWS reste un Glue Streaming depuis Kinesis. Les jobs Bronze, Silver
-et Gold sont des jobs Glue batch lances en chaine par Step Functions quand le
-schedule EventBridge est active. Le schedule est configure a `rate(1 minute)`
-pour le POC, mais il doit rester desactive avant preuve runtime controlee.
+Les jobs Raw et Bronze AWS restent des Glue Streaming: Raw consomme Kinesis et
+Bronze consomme Raw S3 en continu. Les jobs Silver et Gold restent des jobs
+Glue batch lances en chaine par Step Functions quand le schedule EventBridge
+est active. Le schedule est configure a `rate(1 minute)` pour le POC, mais il
+doit rester desactive avant preuve runtime controlee.
 
 Ce premier lot AWS part de Silver S3 pour reduire le risque. Apres le socle
 producer/Kinesis/ECS et le packaging Glue, la phase suivante doit cadrer le
@@ -332,7 +333,7 @@ apres le socle producer/lake/Glue.
 | Athena lit des tables cataloguees, il n'ecrit pas les donnees | Clarifie le role des briques AWS |
 | Contrats, producer/lake et Glue avant le wiring API/dashboard | Les surfaces API et dashboard dependent des schemas et sorties lake |
 | Streamlit Cloud + Cognito par defaut pour le dashboard POC | Simple, securise et limite l'exploitation serveur; ECS/Fargate seulement si l'UI doit etre hebergee dans AWS |
-| EventBridge Scheduler + Step Functions pour la chaine batch AWS | Declenchement regulier, ordre explicite Bronze -> Silver -> Gold -> projection, erreurs lisibles |
+| EventBridge Scheduler + Step Functions pour la chaine batch AWS | Declenchement regulier, ordre explicite Silver -> Gold -> projection apres Bronze streaming, erreurs lisibles |
 | Cadrage technique avant implementation AWS large | Evite d'empiler les services sans decision claire de packaging, IAM et CI/CD |
 | CI/CD automatisee avant runtime AWS global | Evite les validations manuelles non reproductibles |
 | Runtime AWS seulement avec preuves reelles | Evite de confondre implementation, tests statiques et deploiement effectif |

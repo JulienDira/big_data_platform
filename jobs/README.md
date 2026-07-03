@@ -4,7 +4,7 @@
 - `bronze-ingestion`: long-running Structured Streaming job from Raw to Bronze, checkpointed in HDFS.
 - `silver-transformation`: idempotent full rebuild of the canonical Hive table.
 - `raw-consumer/aws.py`: AWS Glue Streaming entry point that reads Avro market candles from Kinesis and writes Raw Parquet envelopes to S3.
-- `bronze-ingestion/aws.py`: AWS Glue batch entry point that decodes Raw Avro payloads and writes Bronze plus rejected records to S3.
+- `bronze-ingestion/aws.py`: AWS Glue Streaming entry point that decodes Raw Avro payloads and writes Bronze plus rejected records to S3.
 - `silver-transformation/aws.py`: AWS Glue batch entry point that writes clean Silver candles to S3 for the AWS Gold job.
 - `gold-indicators/main.py`: on-prem entry point for the idempotent rebuild of the Hive Gold lake table.
 - `gold-indicators/aws.py`: AWS batch entry point that reads Silver from S3,

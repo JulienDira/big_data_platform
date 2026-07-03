@@ -176,6 +176,8 @@ data "aws_iam_policy_document" "glue_lake_transform" {
         "${local.raw_dataset_prefix}/*",
         local.bronze_dataset_prefix,
         "${local.bronze_dataset_prefix}/*",
+        local.bronze_checkpoint_prefix,
+        "${local.bronze_checkpoint_prefix}/*",
         local.bronze_rejected_prefix,
         "${local.bronze_rejected_prefix}/*",
         local.silver_dataset_prefix,
@@ -209,6 +211,7 @@ data "aws_iam_policy_document" "glue_lake_transform" {
     ]
     resources = [
       "${aws_s3_bucket.lake.arn}/${local.bronze_dataset_prefix}/*",
+      "${aws_s3_bucket.lake.arn}/${local.bronze_checkpoint_prefix}/*",
       "${aws_s3_bucket.lake.arn}/${local.bronze_rejected_prefix}/*",
       "${aws_s3_bucket.lake.arn}/${local.silver_dataset_prefix}/*",
       "${aws_s3_bucket.lake.arn}/${local.glue_artifacts_prefix}/spark-event-logs/*",
@@ -447,7 +450,7 @@ resource "aws_glue_job" "raw_market_candles_streaming" {
   ]
 }
 
-resource "aws_glue_job" "bronze_market_candles_batch" {
+resource "aws_glue_job" "bronze_market_candles_streaming" {
   name         = local.bronze_glue_job_name
   role_arn     = aws_iam_role.glue_lake_transform.arn
   glue_version = var.glue_version
@@ -458,18 +461,22 @@ resource "aws_glue_job" "bronze_market_candles_batch" {
   max_retries       = var.glue_job_max_retries
 
   command {
-    name            = "glueetl"
+    name            = "gluestreaming"
     python_version  = "3"
     script_location = local.bronze_script_s3_uri
   }
 
   default_arguments = {
+    "--BRONZE_CHECKPOINT_PATH"           = local.bronze_checkpoint_path
+    "--BRONZE_MAX_FILES_PER_TRIGGER"     = tostring(var.bronze_max_files_per_trigger)
     "--BRONZE_OUTPUT_PATH"               = local.bronze_output_path
+    "--BRONZE_REJECTED_CHECKPOINT_PATH"  = local.bronze_rejected_checkpoint_path
     "--BRONZE_REJECTED_OUTPUT_PATH"      = local.bronze_rejected_output_path
+    "--BRONZE_TRIGGER_INTERVAL"          = var.bronze_trigger_interval
+    "--BRONZE_WATERMARK_DELAY"           = var.bronze_watermark_delay
     "--CONTRACT_PATH"                    = "market-candle-v1.avsc"
     "--RAW_INPUT_PATH"                   = local.raw_output_path
     "--TempDir"                          = "${local.glue_temp_path}/"
-    "--WRITE_MODE"                       = "overwrite"
     "--continuous-log-logGroup"          = aws_cloudwatch_log_group.glue_jobs.name
     "--continuous-log-logStreamPrefix"   = local.bronze_glue_job_name
     "--enable-continuous-cloudwatch-log" = "true"

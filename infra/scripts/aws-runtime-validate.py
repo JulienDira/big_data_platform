@@ -105,6 +105,8 @@ class RuntimeValidator:
         self.ecs_service_name: str | None = None
         self.raw_streaming_job_name: str | None = None
         self.raw_streaming_run_id: str | None = None
+        self.bronze_streaming_job_name: str | None = None
+        self.bronze_streaming_run_id: str | None = None
 
     def record(self, name: str, status: str, details: dict[str, Any] | None = None) -> None:
         self.evidence["checks"].append(
@@ -157,6 +159,7 @@ class RuntimeValidator:
         self.ecs_service_name = self.required_output(self.core_outputs, "ecs_service_name")
         lake_jobs = self.required_output(self.batch_outputs, "lake_ingestion_glue_job_names")
         self.raw_streaming_job_name = lake_jobs["raw_streaming"]
+        self.bronze_streaming_job_name = lake_jobs["bronze_streaming"]
         self.record(
             "terraform_outputs",
             "ok",
@@ -247,14 +250,35 @@ class RuntimeValidator:
         )
         producer_seconds = int(os.getenv("RUNTIME_PRODUCER_SECONDS", "120"))
         self.sleep(producer_seconds)
-        self.scale_ecs_producer(0)
-        self.stop_raw_streaming()
         self.wait_for_s3_objects(self.required_output(self.batch_outputs, "raw_output_path"))
-        self.record("producer_kinesis_raw_window", "ok", {"seconds": producer_seconds})
+
+        bronze_job = self.require_value(
+            self.bronze_streaming_job_name, "bronze streaming job"
+        )
+        self.bronze_streaming_run_id = self.start_glue_job(bronze_job)
+        self.record(
+            "bronze_streaming_started",
+            "ok",
+            {"job_name": bronze_job, "job_run_id": self.bronze_streaming_run_id},
+        )
+
+        bronze_seconds = int(os.getenv("RUNTIME_BRONZE_STREAMING_SECONDS", "60"))
+        self.sleep(bronze_seconds)
+        self.scale_ecs_producer(0)
+        self.stop_bronze_streaming()
+        self.stop_raw_streaming()
+        self.wait_for_s3_objects(
+            self.required_output(self.batch_outputs, "bronze_output_path")
+        )
+        self.record(
+            "producer_kinesis_raw_bronze_window",
+            "ok",
+            {"producer_seconds": producer_seconds, "bronze_seconds": bronze_seconds},
+        )
 
     def run_lake_jobs(self) -> None:
         lake_jobs = self.required_output(self.batch_outputs, "lake_ingestion_glue_job_names")
-        for label in ("bronze_batch", "silver_batch"):
+        for label in ("silver_batch",):
             job_name = lake_jobs[label]
             run_id = self.start_glue_job(job_name)
             self.wait_for_glue_job(job_name, run_id)
@@ -389,6 +413,25 @@ class RuntimeValidator:
                 {"returncode": result.returncode},
             )
 
+        if self.bronze_streaming_job_name and self.bronze_streaming_run_id:
+            result = self.runner.run(
+                [
+                    "aws",
+                    "glue",
+                    "batch-stop-job-run",
+                    "--job-name",
+                    self.bronze_streaming_job_name,
+                    "--job-run-ids",
+                    self.bronze_streaming_run_id,
+                ],
+                allow_failure=True,
+            )
+            self.record_cleanup(
+                "bronze_streaming_stopped",
+                "ok" if result.returncode == 0 else "failed",
+                {"returncode": result.returncode},
+            )
+
     def write_evidence(self, status: str) -> None:
         self.evidence["status"] = status
         self.evidence["completed_at_epoch"] = int(time.time())
@@ -457,6 +500,22 @@ class RuntimeValidator:
             ]
         )
         self.raw_streaming_run_id = None
+
+    def stop_bronze_streaming(self) -> None:
+        if not self.bronze_streaming_job_name or not self.bronze_streaming_run_id:
+            return
+        self.runner.run(
+            [
+                "aws",
+                "glue",
+                "batch-stop-job-run",
+                "--job-name",
+                self.bronze_streaming_job_name,
+                "--job-run-ids",
+                self.bronze_streaming_run_id,
+            ]
+        )
+        self.bronze_streaming_run_id = None
 
     def scale_ecs_producer(self, desired_count: int) -> None:
         self.runner.run(

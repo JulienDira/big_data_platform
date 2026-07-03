@@ -10,7 +10,8 @@ Creates the AWS lake and batch runtime surface:
   datasets.
 - Glue Data Catalog databases and external Parquet tables.
 - Glue Streaming job for Avro Kinesis -> Raw S3.
-- Glue Spark batch jobs for Raw -> Bronze and Bronze -> Silver.
+- Glue Streaming job for Raw S3 -> Bronze S3 plus rejected records.
+- Glue Spark batch job for Bronze -> Silver.
 - Glue Spark job for `jobs/gold-indicators/aws.py`.
 - IAM role and policies for the Glue job.
 - CloudWatch log group for Glue execution logs.
@@ -54,7 +55,8 @@ terraform plan
 ```
 
 The lake ingestion jobs expect the Kinesis stream from `infra/aws/core` and
-produce Silver Parquet at the `silver_input_path` output. Do not run those Glue
-jobs as part of the CI/CD implementation phase. Only a later runtime validation
-phase should start jobs and check S3 outputs, Glue tables and Athena queries in
-the target AWS account.
+produce Silver Parquet at the `silver_input_path` output. Raw and Bronze are
+streaming jobs; Silver and Gold are batch jobs. Do not run those Glue jobs as
+part of the CI/CD implementation phase. Only a later runtime validation phase
+should start jobs and check S3 outputs, Glue tables and Athena queries in the
+target AWS account.

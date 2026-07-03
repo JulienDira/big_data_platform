@@ -21,7 +21,7 @@ Current prepared AWS architecture:
 ```text
 Binance REST -> ECS/Fargate producer -> Kinesis Data Stream
 -> Glue Streaming Raw S3 -> EventBridge Scheduler / Step Functions
--> Glue batch Bronze S3 -> Glue batch Silver S3 -> Glue Spark Gold S3
+-> Glue Streaming Bronze S3 -> Glue batch Silver S3 -> Glue Spark Gold S3
 -> trading_gold S3 -> Glue Data Catalog -> Athena
 -> DynamoDB latest projection -> API Gateway/Lambda -> Cognito/Streamlit
 ```
@@ -64,103 +64,99 @@ AWS preparation before this phase:
   prepare DynamoDB latest metrics, API Gateway/Lambda, Cognito, Streamlit
   Cloud wiring, alarms and Budget.
 - `infra/aws/orchestration` prepares EventBridge Scheduler and Step Functions
-  for the regular batch chain after Raw. The schedule is disabled by default.
+  for the regular batch chain after Bronze. The schedule is disabled by
+  default.
 
 ## Last Completed Phase
 
-Phase: Phase 11 - AWS scheduled batch orchestration.
+Phase: Phase 12 - AWS Raw to Bronze streaming refactor.
 
-Goal: add a Terraform-managed AWS orchestration layer that can trigger the
-post-Raw batch chain every minute through EventBridge Scheduler and Step
-Functions, while keeping the schedule disabled until controlled AWS runtime
-validation is available.
+Goal: replace the AWS Bronze batch job with a Glue Streaming job that reads Raw
+S3 continuously, writes Bronze S3 and rejected S3 with separate checkpoints,
+and keeps Silver/Gold as bounded batch steps.
 
 Status: completed as static/local implementation and documentation. AWS runtime
-validation was not executed because this phase stayed static/local and the repo
-still lacks proven AWS/GitHub runtime execution.
+validation was not executed because this phase did not run real Glue, Kinesis,
+S3, Step Functions or EventBridge resources.
 
 ## Changes Completed
 
-- Added `infra/aws/orchestration`:
-  - Step Functions Standard state machine for Bronze -> Silver -> Gold ->
-    latest projection;
-  - EventBridge Scheduler trigger with default expression `rate(1 minute)`;
-  - schedule disabled by default through `batch_pipeline_schedule_enabled`;
-  - DynamoDB `batch-pipeline` single-flight lock with conditional `PutItem`
-    and TTL;
-  - IAM roles for Step Functions and Scheduler;
-  - CloudWatch log group and stack outputs.
-- Extended `infra/aws/batch` outputs with scalar Bronze, Silver and Gold Glue
-  job names for downstream Terraform wiring.
-- Extended `infra/aws/serving` outputs with `latest_projection_lambda_arn`.
-- Updated `.github/workflows/aws-deploy.yml`:
-  - PR/static validation now includes `infra/aws/orchestration`;
-  - non-PR Terraform apply now applies `orchestration` after `batch` and
-    `serving`;
-  - the orchestration stack receives Glue job names and the projection Lambda
-    ARN from Terraform outputs;
-  - `batch_pipeline_schedule_enabled=false` is passed by default.
-- Added static tests for orchestration structure, schedule defaults, DynamoDB
-  lock behavior, outputs and workflow integration.
-- Updated docs:
-  - `cadrage.md`;
-  - `docs/aws-service-iam-decisions.md`;
-  - `infra/aws/README.md`;
-  - `infra/aws/orchestration/README.md`.
+- Refactored `jobs/bronze-ingestion/aws.py`:
+  - reads Raw S3 as a streaming Parquet file source with explicit schema;
+  - reuses the shared Avro decode and Bronze valid/rejected transformations;
+  - writes Bronze and rejected Parquet streams with separate checkpoints;
+  - removes batch `WRITE_MODE=overwrite` behavior.
+- Added shared helpers:
+  - `AWS_RAW_MARKET_CANDLES_SCHEMA` in `jobs/utils/market_schema.py`;
+  - `write_parquet_stream` in `jobs/utils/s3_io.py`.
+- Updated `infra/aws/batch`:
+  - Bronze Glue job is now `gluestreaming`;
+  - job name is `bronze-market-candles-streaming`;
+  - Bronze checkpoint, rejected checkpoint, trigger, watermark and
+    `maxFilesPerTrigger` are Terraform-driven;
+  - lake-transform IAM can write Bronze checkpoints without gaining Gold,
+    `trading_gold`, DynamoDB, API or PostgreSQL access;
+  - `lake_ingestion_glue_job_names` now exposes `bronze_streaming`.
+- Updated `infra/aws/orchestration` and `.github/workflows/aws-deploy.yml`:
+  - Step Functions now starts at Silver and runs Silver -> Gold -> latest
+    projection;
+  - the orchestration stack no longer receives a Bronze Glue job variable;
+  - the schedule stays disabled by default.
+- Updated `infra/scripts/aws-runtime-validate.py`:
+  - starts Raw streaming, waits for Raw S3 objects, starts Bronze streaming,
+    then stops both streams;
+  - runs only Silver and Gold as batch lake jobs;
+  - cleanup scales ECS down and stops both streaming jobs when present.
+- Added static tests for Bronze streaming, orchestration and runtime-validator
+  behavior.
+- Updated docs: `cadrage.md`, `jobs/README.md`,
+  `docs/aws-service-iam-decisions.md`, `docs/aws-lake-ingestion-cadrage.md`,
+  `docs/aws-implementation-step-audit.md`, `infra/aws/README.md`,
+  `infra/aws/batch/README.md`, `infra/aws/orchestration/README.md`.
 
-No RDS/PostgreSQL AWS target, new historical datastore, direct Streamlit AWS
-SDK access or broad data pipeline refactor was introduced.
+No on-premise entry point, RDS/PostgreSQL AWS target, DynamoDB/API/dashboard
+logic, Gold calculation or `trading_gold` contract was changed.
 
 ## Validation Completed
 
 Repository state and source control:
 
-- `git status --short --untracked-files=all` was checked before changes.
+- `git status --short --untracked-files=all` was checked before changes and
+  the worktree was clean.
 
 Static/local validation:
 
-- Host `python` failed because the WindowsApps Python launcher could not create
-  the process. `py` was not installed. The repo Docker test path was used
-  instead.
 - First `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test` failed
   on Docker access:
   `C:\Users\julie\.docker\config.json: Access is denied` and Docker pipe
   access denied.
 - After approved Docker access,
   `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test` passed:
-  56 tests OK, 1 skipped because the local Spark classpath lacks the
+  61 tests OK, 1 skipped because the local Spark classpath lacks the
   `spark-avro` package.
+- First `terraform fmt -check -recursive infra/aws` reported
+  `infra/aws/batch/main.tf`.
+- `terraform fmt -recursive infra/aws` formatted that Terraform file.
 - `terraform fmt -check -recursive infra/aws` passed.
-- Initial Terraform provider initialization for `infra/aws/orchestration`
-  failed because sandboxed network access to `registry.terraform.io` was
-  blocked.
-- After approved provider-initialization network access,
-  `terraform -chdir=infra/aws/orchestration init -backend=false -input=false`
-  succeeded with `hashicorp/aws v5.100.0`.
-- `terraform -chdir=infra/aws/core validate` passed.
 - `terraform -chdir=infra/aws/batch validate` passed.
-- `terraform -chdir=infra/aws/serving validate` passed.
 - `terraform -chdir=infra/aws/orchestration validate` passed.
+- `terraform -chdir=infra/aws/serving validate` passed.
 - `git diff --check` passed with LF/CRLF normalization warnings on Windows.
 
 Runtime and deployment availability checks:
 
 - No AWS runtime checks, Terraform apply, Step Functions execution,
-  EventBridge schedule activation, Glue run or Lambda invocation were executed
-  in this phase.
+  EventBridge schedule activation, Glue run, ECS run, Kinesis write, S3 object
+  check, Athena query or Lambda invocation were executed in this phase.
 
 ## Proof Obtained
 
-- The repository now contains a Terraform-managed orchestration stack for the
-  scheduled AWS batch chain after Raw.
-- The state machine statically encodes the intended order:
-  Bronze -> Silver -> Gold -> latest projection.
-- The EventBridge Scheduler expression is `rate(1 minute)`, but the schedule
-  is disabled by default.
-- The state machine uses a DynamoDB conditional lock so a one-minute trigger
-  can exit cleanly when a previous run still owns the lock.
-- GitHub Actions deployment wiring now applies the orchestration stack after
-  `batch` and `serving` and keeps the schedule disabled by default.
+- The repo now statically models Raw and Bronze as Glue Streaming jobs.
+- Bronze streaming reads Raw S3, writes Bronze and rejected S3, and uses
+  dedicated checkpoints.
+- Step Functions no longer tries to run a long-running Bronze stream as a
+  synchronous batch step.
+- The planned batch chain is now Silver -> Gold -> latest projection.
 - Local unit/static tests and Terraform validation pass.
 
 ## Not Yet Proven
@@ -175,7 +171,8 @@ Runtime and deployment availability checks:
 - Terraform apply succeeds in the target AWS account.
 - ECS service steady state and controlled scale-down.
 - Kinesis record ingestion in AWS.
-- Glue Streaming consumption from Kinesis.
+- Raw Glue Streaming consumption from Kinesis.
+- Bronze Glue Streaming consumption from Raw S3.
 - Raw/Bronze/Silver S3 outputs in AWS.
 - Glue Gold execution and `trading_gold` outputs.
 - Glue Data Catalog visibility in AWS.
@@ -187,8 +184,7 @@ Runtime and deployment availability checks:
 - CloudWatch alarms, SNS notifications and AWS Budget visibility.
 - `build/aws-runtime-evidence.json` from a real AWS runtime-validation run.
 - EventBridge Scheduler actually triggering the Step Functions state machine.
-- Step Functions executing Bronze, Silver, Gold and latest projection in AWS.
-- The DynamoDB lock preventing overlapping real one-minute executions.
+- Step Functions executing Silver, Gold and latest projection in AWS.
 - Safe enabling of `batch_pipeline_schedule_enabled=true` in a bounded POC
   runtime window.
 
@@ -198,29 +194,31 @@ Perform the one-time GitHub/AWS bootstrap described in `infra/aws/README.md`,
 then run the GitHub Actions workflow through a push to `main` or
 `workflow_dispatch` with the orchestration schedule still disabled.
 
-If bootstrap is complete and the workflow succeeds, record the Terraform
-outputs for `core`, `batch`, `serving` and `orchestration`, then run a
-controlled AWS runtime-validation pass. Enable
-`batch_pipeline_schedule_enabled=true` only in a bounded validation/demo window
-after the first manual orchestration run proves Bronze -> Silver -> Gold ->
-latest projection.
+If bootstrap is complete and the workflow succeeds, run controlled AWS runtime
+validation. The runtime proof should start Raw streaming, start Bronze
+streaming after Raw S3 objects appear, run the producer in a bounded window,
+stop both streams, run Silver and Gold batch jobs, then verify S3, Glue Catalog,
+Athena, latest projection, API/auth and observability surfaces that are in
+scope.
 
 If the workflow or runtime validation fails, recommend one targeted remediation
 phase named after the failing surface, for example OIDC trust, Terraform state,
-ECR artifact publication, ECS/Kinesis, Glue Raw, Glue Bronze/Silver, Glue Gold,
-Athena, Step Functions/Scheduler, DynamoDB projection or API Gateway/Cognito.
+ECR artifact publication, ECS/Kinesis, Glue Raw streaming, Glue Bronze
+streaming, Glue Silver, Glue Gold, Athena, Step Functions/Scheduler, DynamoDB
+projection or API Gateway/Cognito.
 
 Ready-to-use next-agent prompt:
 
 ```text
 Mission:
 Run the deployed GitHub Actions path in a real AWS/GitHub environment after
-completing the bootstrap in infra/aws/README.md, then validate the scheduled
-batch orchestration in a controlled window.
+completing the bootstrap in infra/aws/README.md, then validate the Raw and
+Bronze Glue Streaming path plus the scheduled Silver -> Gold -> latest
+projection batch chain in a controlled window.
 
 Before doing anything, read AGENTS.md, cadrage.md, docs/phase-handoff.md,
-infra/aws/README.md, infra/aws/orchestration/README.md and
-.github/workflows/aws-deploy.yml. Confirm GitHub Environment dev has
+infra/aws/README.md, infra/aws/batch/README.md, infra/aws/orchestration/README.md
+and .github/workflows/aws-deploy.yml. Confirm GitHub Environment dev has
 AWS_ACCOUNT_ID, AWS_DEPLOY_ROLE_ARN, AWS_REGION, AWS_ARTIFACT_BUCKET,
 TF_STATE_BUCKET, TF_STATE_REGION, VPC_ID, FARGATE_SUBNET_IDS,
 STREAMLIT_CALLBACK_URLS, STREAMLIT_LOGOUT_URLS and API_CORS_ALLOWED_ORIGINS.
@@ -230,14 +228,16 @@ permissions exist.
 Run the workflow from GitHub, not with local long-lived AWS keys. Keep
 batch_pipeline_schedule_enabled=false for the normal deployment. Capture exact
 evidence from the GitHub run, Terraform outputs and build/aws-runtime-evidence.json.
-For the orchestration proof, first start the Step Functions state machine in a
-controlled manual run and verify Bronze -> Silver -> Gold -> latest projection.
-Only then enable the one-minute schedule in a bounded POC window. Do not claim
-AWS runtime proof if any bootstrap, permission or service check is missing.
+For runtime proof, start Raw streaming, prove Raw S3 objects, start Bronze
+streaming, prove Bronze S3 objects, run Silver and Gold batch, then run latest
+projection. Only enable the one-minute EventBridge schedule in a bounded POC
+window after a manual Step Functions run proves Silver -> Gold -> projection.
+Do not claim AWS runtime proof if any bootstrap, permission or service check is
+missing.
 ```
 
 ## Suggested Commit Message
 
 ```text
-feat: add scheduled AWS batch orchestration
+feat: stream AWS bronze ingestion
 ```
