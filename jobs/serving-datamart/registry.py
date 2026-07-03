@@ -10,6 +10,7 @@ class ServingTable:
     sql_file: str
     target_env: str
     mode: str = "overwrite"
+    partition_columns: tuple[str, ...] = ()
 
 
 SERVING_TABLES = (
@@ -17,6 +18,7 @@ SERVING_TABLES = (
         name="market_indicators",
         sql_file="market_indicators.sql",
         target_env="DATAMART_INDICATORS_TABLE",
+        partition_columns=("event_date", "symbol", "interval"),
     ),
     ServingTable(
         name="market_indicators_latest",
@@ -32,6 +34,7 @@ SERVING_TABLES = (
         name="market_daily_summary",
         sql_file="market_daily_summary.sql",
         target_env="DATAMART_DAILY_SUMMARY_TABLE",
+        partition_columns=("event_date", "symbol"),
     ),
 )
 
@@ -76,4 +79,7 @@ def _spark_file(name: str) -> Path | None:
     except Exception:
         return None
 
-    return Path(SparkFiles.get(name))
+    try:
+        return Path(SparkFiles.get(name))
+    except Exception:
+        return None

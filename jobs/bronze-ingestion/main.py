@@ -1,18 +1,12 @@
 import os
 from pathlib import Path
+import sys
 
 from pyspark.sql import SparkSession
-from pyspark.sql.avro.functions import from_avro
-from pyspark.sql.functions import (
-    col,
-    dayofmonth,
-    expr,
-    month,
-    to_date,
-    year,
-)
+from pyspark.sql.functions import col
 from pyspark.sql.types import (
     BinaryType,
+    BooleanType,
     DateType,
     IntegerType,
     LongType,
@@ -21,6 +15,10 @@ from pyspark.sql.types import (
     StructType,
     TimestampType,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from utils.bronze import build_bronze_rejected, build_bronze_valid, decode_avro_payload
 
 
 RAW_SCHEMA = StructType(
@@ -36,6 +34,7 @@ RAW_SCHEMA = StructType(
         StructField("ingested_at", TimestampType(), False),
         StructField("symbol", StringType(), False),
         StructField("interval", StringType(), False),
+        StructField("is_avro_decodable", BooleanType(), True),
         StructField("ingestion_date", DateType(), False),
         StructField("ingestion_hour", IntegerType(), False),
     ]
@@ -69,26 +68,14 @@ def main() -> None:
         .load(raw_path)
     )
 
-    # Confluent Avro payloads start with a magic byte and a four-byte schema ID.
-    decoded = raw.withColumn(
-        "data",
-        from_avro(
-            expr("substring(value, 6, length(value) - 5)"),
-            schema,
-            {"mode": "PERMISSIVE"},
-        ),
+    decoded = decode_avro_payload(
+        raw,
+        schema,
+        value_column="value",
+        confluent_header=True,
     )
 
-    valid = (
-        decoded.filter(col("data").isNotNull())
-        .select("data.*")
-        .withColumn("event_date", to_date("open_time"))
-        .withColumn("year", year("open_time"))
-        .withColumn("month", month("open_time"))
-        .withColumn("day", dayofmonth("open_time"))
-        .withWatermark("open_time", watermark_delay)
-        .dropDuplicates(["event_id"])
-    )
+    valid = build_bronze_valid(decoded, watermark_delay=watermark_delay)
 
     bronze_query = (
         valid.writeStream.format("parquet")
@@ -101,7 +88,7 @@ def main() -> None:
         .start()
     )
 
-    invalid = decoded.filter(col("data").isNull()).select(col("key"), col("value"))
+    invalid = build_bronze_rejected(decoded).select(col("key"), col("value"))
     error_query = (
         invalid.writeStream.format("kafka")
         .option("kafka.bootstrap.servers", bootstrap_servers)

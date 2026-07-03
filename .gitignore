@@ -9,4 +9,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log

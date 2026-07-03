@@ -125,7 +125,7 @@ $commands = @{
     "run-silver"    = @("--profile", "tools", "run", "--rm", "--no-deps", "spark-client", "bash", "/workspace/infra/scripts/submit-silver.sh")
     "run-gold"      = @("--profile", "tools", "run", "--rm", "--no-deps", "spark-client", "bash", "/workspace/infra/scripts/submit-gold.sh")
     "run-serving"   = @("--profile", "tools", "run", "--rm", "--no-deps", "spark-client", "bash", "/workspace/infra/scripts/submit-serving.sh")
-    "test"          = @("--profile", "tools", "run", "--rm", "--no-deps", "spark-client", "python3", "-m", "unittest", "discover", "-s", "/workspace/tests", "-v")
+    "test"          = @("--profile", "tools", "run", "--rm", "--no-deps", "spark-client", "bash", "-lc", "export PYTHONPATH=/workspace:/workspace/jobs:/opt/spark/python:/opt/spark/python/lib/py4j-0.10.9.7-src.zip; cd /workspace; python3 -m unittest discover -s tests -v")
     "config"        = @("config")
 }
 

@@ -57,3 +57,10 @@ Le job `jobs/serving-datamart` lit `gold.market_indicators`, applique une
 registry SQL et reconstruit les tables PostgreSQL `market_indicators`,
 `market_indicators_latest`, `market_multitimeframe_signals` et
 `market_daily_summary`.
+
+## Cible AWS
+
+La cible AWS ne publie pas ces tables dans PostgreSQL. Les memes
+transformations de restitution sont materialisees en Parquet sur S3 sous une
+base logique `trading_gold`, puis exposees par Glue Data Catalog et Athena.
+PostgreSQL reste donc une projection on-premise, pas une cible cloud.

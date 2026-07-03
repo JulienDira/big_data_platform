@@ -2,3 +2,4 @@ numpy==1.24.4
 pandas==2.0.3
 pyarrow==14.0.2
 psycopg2-binary==2.9.10
+fastavro==1.9.7

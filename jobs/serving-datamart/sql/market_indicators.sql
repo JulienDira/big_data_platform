@@ -16,6 +16,5 @@ SELECT
   bollinger_upper,
   bollinger_lower,
   event_date,
-  current_timestamp() AS loaded_at
+  {{processing_timestamp}} AS loaded_at
 FROM {{source_view}}
-

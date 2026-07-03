@@ -11,20 +11,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from registry import get_serving_tables, read_table_sql, render_sql
 from utils.env import csv_env, optional_env, required_env
 from utils.jdbc import write_postgres_table
-from utils.market_schema import GOLD_SOURCE_VIEW
+from utils.serving import build_serving_render_context, materialize_serving_tables
 
 
 def build_render_context() -> dict[str, str]:
-    context_intervals = csv_env("DATAMART_CONTEXT_INTERVALS", "15m,1h")
-    if len(context_intervals) != 2:
-        raise RuntimeError("DATAMART_CONTEXT_INTERVALS must contain exactly two values")
-
-    return {
-        "source_view": GOLD_SOURCE_VIEW,
-        "base_interval": optional_env("DATAMART_BASE_INTERVAL", "1m"),
-        "context_interval_1": context_intervals[0],
-        "context_interval_2": context_intervals[1],
-    }
+    return build_serving_render_context(
+        base_interval=optional_env("DATAMART_BASE_INTERVAL", "1m"),
+        context_intervals=csv_env("DATAMART_CONTEXT_INTERVALS", "15m,1h"),
+    )
 
 
 def main() -> None:
@@ -40,12 +34,16 @@ def main() -> None:
     )
     spark.sparkContext.setLogLevel(os.getenv("SPARK_LOG_LEVEL", "WARN"))
 
-    spark.table(gold_source).createOrReplaceTempView(GOLD_SOURCE_VIEW)
+    gold = spark.table(gold_source)
     context = build_render_context()
 
-    for table in get_serving_tables():
-        sql = render_sql(read_table_sql(table), context)
-        frame = spark.sql(sql)
+    for table, frame in materialize_serving_tables(
+        gold,
+        get_serving_tables(),
+        read_table_sql,
+        render_sql,
+        context,
+    ):
         write_postgres_table(
             frame,
             url=jdbc_url,

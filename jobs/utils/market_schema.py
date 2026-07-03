@@ -1,13 +1,19 @@
 try:
     from pyspark.sql.types import (
+        BinaryType,
+        BooleanType,
+        DateType,
         DoubleType,
+        IntegerType,
+        LongType,
         StringType,
         StructField,
         StructType,
         TimestampType,
     )
 except ModuleNotFoundError:
-    DoubleType = StringType = StructField = StructType = TimestampType = None
+    BinaryType = BooleanType = DateType = DoubleType = IntegerType = LongType = None
+    StringType = StructField = StructType = TimestampType = None
 
 
 SILVER_COLUMNS = [
@@ -55,6 +61,24 @@ GOLD_COLUMNS = [
 GOLD_PARTITIONS = ["event_date", "symbol", "interval"]
 
 if StructType is not None:
+    AWS_RAW_MARKET_CANDLES_SCHEMA = StructType(
+        [
+            StructField("source", StringType(), False),
+            StructField("stream_name", StringType(), False),
+            StructField("partition_key", StringType(), True),
+            StructField("sequence_number", StringType(), True),
+            StructField("approximate_arrival_timestamp", TimestampType(), True),
+            StructField("value", BinaryType(), False),
+            StructField("payload_size_bytes", IntegerType(), True),
+            StructField("symbol", StringType(), False),
+            StructField("interval", StringType(), False),
+            StructField("is_avro_decodable", BooleanType(), True),
+            StructField("ingested_at", TimestampType(), False),
+            StructField("ingestion_date", DateType(), False),
+            StructField("ingestion_hour", IntegerType(), False),
+        ]
+    )
+
     GOLD_SCHEMA = StructType(
         [
             StructField("symbol", StringType(), False),
@@ -76,6 +100,7 @@ if StructType is not None:
         ]
     )
 else:
+    AWS_RAW_MARKET_CANDLES_SCHEMA = None
     GOLD_SCHEMA = None
 
 GOLD_SOURCE_COLUMNS = [
