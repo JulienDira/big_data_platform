@@ -18,6 +18,11 @@ output "latest_projection_lambda_name" {
   value       = aws_lambda_function.latest_projection.function_name
 }
 
+output "latest_projection_lambda_arn" {
+  description = "DynamoDB latest projection Lambda function ARN."
+  value       = aws_lambda_function.latest_projection.arn
+}
+
 output "cognito_user_pool_id" {
   description = "Cognito User Pool id."
   value       = aws_cognito_user_pool.users.id

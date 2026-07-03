@@ -53,7 +53,7 @@ jobs:
       - name: Terraform validate
         run: |
           set -euo pipefail
-          for stack in core batch serving; do
+          for stack in core batch serving orchestration; do
             terraform -chdir="infra/aws/${stack}" init -backend=false -input=false
             terraform -chdir="infra/aws/${stack}" validate
           done
@@ -272,8 +272,12 @@ jobs:
           echo "athena_results_bucket_name=$(terraform -chdir=infra/aws/batch output -raw athena_results_bucket_name)" >> "${GITHUB_OUTPUT}"
           echo "athena_workgroup_name=$(terraform -chdir=infra/aws/batch output -raw athena_workgroup_name)" >> "${GITHUB_OUTPUT}"
           echo "athena_output_location=$(terraform -chdir=infra/aws/batch output -raw athena_output_location)" >> "${GITHUB_OUTPUT}"
+          echo "bronze_glue_job_name=$(terraform -chdir=infra/aws/batch output -raw bronze_glue_job_name)" >> "${GITHUB_OUTPUT}"
+          echo "silver_glue_job_name=$(terraform -chdir=infra/aws/batch output -raw silver_glue_job_name)" >> "${GITHUB_OUTPUT}"
+          echo "gold_glue_job_name=$(terraform -chdir=infra/aws/batch output -raw gold_glue_job_name)" >> "${GITHUB_OUTPUT}"
 
       - name: Apply serving stack from immutable Lambda package
+        id: serving
         shell: bash
         run: |
           set -euo pipefail
@@ -304,6 +308,26 @@ jobs:
             -var="market_candles_stream_name=${{ needs.publish-artifacts.outputs.kinesis_stream_name }}" \
             "${alert_args[@]}"
 
+          echo "latest_projection_lambda_arn=$(terraform -chdir=infra/aws/serving output -raw latest_projection_lambda_arn)" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply orchestration stack with schedule disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/aws/orchestration init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/orchestration.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="use_lockfile=true"
+
+          terraform -chdir=infra/aws/orchestration apply -auto-approve -input=false \
+            -var="aws_region=${AWS_REGION}" \
+            -var="bronze_glue_job_name=${{ steps.batch.outputs.bronze_glue_job_name }}" \
+            -var="silver_glue_job_name=${{ steps.batch.outputs.silver_glue_job_name }}" \
+            -var="gold_glue_job_name=${{ steps.batch.outputs.gold_glue_job_name }}" \
+            -var="latest_projection_lambda_arn=${{ steps.serving.outputs.latest_projection_lambda_arn }}" \
+            -var="batch_pipeline_schedule_enabled=false"
+
       - name: Print deployment preparation outputs
         shell: bash
         run: |
@@ -311,6 +335,7 @@ jobs:
           terraform -chdir=infra/aws/core output
           terraform -chdir=infra/aws/batch output
           terraform -chdir=infra/aws/serving output
+          terraform -chdir=infra/aws/orchestration output
 
   runtime-validation:
     name: Runtime Validation

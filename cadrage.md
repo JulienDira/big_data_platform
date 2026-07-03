@@ -9,7 +9,7 @@ memes traitements metier avec des entry points separes.
 | Environnement | Stack cible |
 |---|---|
 | On-premise actuel | Docker Compose, Kafka, Spark Submit vers YARN, HDFS, Hive, Airflow, PostgreSQL Serving |
-| AWS cible | ECS/Fargate Producer, Kinesis, Glue Spark, Glue Streaming ETL, S3, Glue Data Catalog, Athena, DynamoDB latest metrics, API Gateway/Lambda, Cognito, Streamlit Cloud |
+| AWS cible | ECS/Fargate Producer, Kinesis, Glue Spark, Glue Streaming ETL, EventBridge Scheduler, Step Functions, S3, Glue Data Catalog, Athena, DynamoDB latest metrics, API Gateway/Lambda, Cognito, Streamlit Cloud |
 
 Cette cible AWS est une trajectoire, pas un lot d'implementation unique.
 Producer/Kinesis/Glue/S3/Athena doivent etre cadres et implementes avant les
@@ -23,6 +23,13 @@ PostgreSQL reste une cible de serving on-premise. Il n'est pas retenu comme
 cible AWS dans ce cadrage. Cote AWS, les restitutions actuellement publiees en
 Serving PostgreSQL doivent etre materialisees en tables Gold enrichies sur S3,
 cataloguees dans Glue Data Catalog et requetables via Athena.
+
+La chaine batch AWS apres Raw est orchestree par EventBridge Scheduler et Step
+Functions: Raw reste alimente par Glue Streaming depuis Kinesis, puis Step
+Functions lance les jobs Glue Bronze, Silver et Gold dans l'ordre avant
+d'appeler la projection latest metrics vers DynamoDB. Le schedule POC cible
+`rate(1 minute)`, mais il reste desactive par defaut tant que le runtime AWS
+n'est pas prouve.
 
 Le document brut `Cahier des charges.docx` reste la source fonctionnelle
 initiale. La synthese consultable et versionnable pour les choix de services
@@ -135,8 +142,9 @@ metrics temps reel, pas comme remplacement de la table historisee Athena.
 
 Les premieres phases ont deja consolide le socle on-premise, les
 transformations communes et la cible AWS statique: producer/Kinesis/ECS,
-Kinesis -> S3 Raw/Bronze/Silver, Glue Gold, `trading_gold` S3/Athena et la
-surface API/observabilite.
+Kinesis -> S3 Raw/Bronze/Silver, Glue Gold, `trading_gold` S3/Athena, la
+surface API/observabilite et l'orchestration batch EventBridge Scheduler/Step
+Functions.
 
 La validation runtime AWS globale ne doit venir qu'apres un chemin de
 deploiement automatise et verifie: publication d'images ECR, artefacts Glue,
@@ -235,7 +243,15 @@ Ordre recommande:
      decisions projet;
    - corriger seulement les ecarts concrets par changements minimaux et
      documenter les preuves statiques et limites restantes.
-11. Phase de deploiement AWS automatise et validation runtime controlee:
+11. Phase d'orchestration batch planifiee AWS:
+   - creer un stack Terraform dedie pour EventBridge Scheduler, Step
+     Functions et le verrou DynamoDB de la chaine batch;
+   - garder Raw en Glue Streaming et orchestrer Bronze, Silver, Gold puis la
+     projection latest metrics;
+   - utiliser `rate(1 minute)` comme cadence POC, avec schedule desactive par
+     defaut;
+   - valider statiquement sans lancer Step Functions ni jobs Glue reels.
+12. Phase de deploiement AWS automatise et validation runtime controlee:
    - seulement si la verification statique par maillon ne laisse pas de point
      bloquant;
    - verifier et durcir le chemin DevOps: GitHub Actions OIDC, role AWS
@@ -247,9 +263,10 @@ Ordre recommande:
      et le flux `push main -> validate -> publish -> deploy -> runtime check`;
    - lancer le chemin automatise dev/POC si l'environnement le permet;
    - executer une validation runtime AWS controlee et bornee en cout: ECS
-     producer, Kinesis, Glue Raw/Bronze/Silver/Gold, S3, Glue Catalog, Athena,
-     DynamoDB/API/Cognito/Streamlit/observabilite seulement pour les surfaces
-     disponibles et configurees;
+     producer, Kinesis, Glue Raw/Bronze/Silver/Gold, Step Functions,
+     EventBridge Scheduler, S3, Glue Catalog, Athena, DynamoDB/API/Cognito/
+     Streamlit/observabilite seulement pour les surfaces disponibles et
+     configurees;
    - si les credentials, callbacks, droits ou bootstrap manquent, documenter le
      blocage exact et ne pas revendiquer de runtime proof.
 
@@ -292,6 +309,11 @@ volontairement simple:
 5. ecrire chaque table en Parquet sur S3;
 6. laisser Glue Data Catalog et Athena exposer les donnees.
 
+Le job Raw AWS reste un Glue Streaming depuis Kinesis. Les jobs Bronze, Silver
+et Gold sont des jobs Glue batch lances en chaine par Step Functions quand le
+schedule EventBridge est active. Le schedule est configure a `rate(1 minute)`
+pour le POC, mais il doit rester desactive avant preuve runtime controlee.
+
 Ce premier lot AWS part de Silver S3 pour reduire le risque. Apres le socle
 producer/Kinesis/ECS et le packaging Glue, la phase suivante doit cadrer le
 maillon manquant Kinesis -> S3 Raw/Bronze/Silver. DynamoDB, API Gateway/Lambda,
@@ -310,6 +332,7 @@ apres le socle producer/lake/Glue.
 | Athena lit des tables cataloguees, il n'ecrit pas les donnees | Clarifie le role des briques AWS |
 | Contrats, producer/lake et Glue avant le wiring API/dashboard | Les surfaces API et dashboard dependent des schemas et sorties lake |
 | Streamlit Cloud + Cognito par defaut pour le dashboard POC | Simple, securise et limite l'exploitation serveur; ECS/Fargate seulement si l'UI doit etre hebergee dans AWS |
+| EventBridge Scheduler + Step Functions pour la chaine batch AWS | Declenchement regulier, ordre explicite Bronze -> Silver -> Gold -> projection, erreurs lisibles |
 | Cadrage technique avant implementation AWS large | Evite d'empiler les services sans decision claire de packaging, IAM et CI/CD |
 | CI/CD automatisee avant runtime AWS global | Evite les validations manuelles non reproductibles |
 | Runtime AWS seulement avec preuves reelles | Evite de confondre implementation, tests statiques et deploiement effectif |
@@ -337,8 +360,9 @@ Tests attendus:
   retenu est cadre, developpe, audite statiquement, deploye par CI/CD et qu'un
   compte est disponible: GitHub Actions OIDC, artefacts immuables ECR/S3,
   Terraform automatise en dev/POC, Kinesis/ECS, ingestion Raw/Bronze/Silver S3,
-  Glue Gold, Glue Catalog, Athena et seulement les surfaces
-  DynamoDB/API/Cognito/dashboard/observabilite configurees.
+  Glue Gold, Step Functions/EventBridge Scheduler, Glue Catalog, Athena et
+  seulement les surfaces DynamoDB/API/Cognito/dashboard/observabilite
+  configurees.
 
 Criteres d'acceptation:
 

@@ -20,8 +20,9 @@ Current prepared AWS architecture:
 
 ```text
 Binance REST -> ECS/Fargate producer -> Kinesis Data Stream
--> Glue Streaming Raw S3 -> Glue batch Bronze S3 -> Glue batch Silver S3
--> Glue Spark Gold S3 -> trading_gold S3 -> Glue Data Catalog -> Athena
+-> Glue Streaming Raw S3 -> EventBridge Scheduler / Step Functions
+-> Glue batch Bronze S3 -> Glue batch Silver S3 -> Glue Spark Gold S3
+-> trading_gold S3 -> Glue Data Catalog -> Athena
 -> DynamoDB latest projection -> API Gateway/Lambda -> Cognito/Streamlit
 ```
 
@@ -62,137 +63,105 @@ AWS preparation before this phase:
 - `apps/aws-serving-api`, `apps/streamlit-dashboard` and `infra/aws/serving`
   prepare DynamoDB latest metrics, API Gateway/Lambda, Cognito, Streamlit
   Cloud wiring, alarms and Budget.
+- `infra/aws/orchestration` prepares EventBridge Scheduler and Step Functions
+  for the regular batch chain after Raw. The schedule is disabled by default.
 
 ## Last Completed Phase
 
-Phase: Phase 10 - AWS automated deployment and runtime validation.
+Phase: Phase 11 - AWS scheduled batch orchestration.
 
-Goal: harden the GitHub Actions/Terraform AWS deployment path so that, after
-one-time GitHub/AWS bootstrap, a push to `main` validates, publishes immutable
-artifacts, deploys the dev/POC AWS stack and runs controlled runtime
-validation.
+Goal: add a Terraform-managed AWS orchestration layer that can trigger the
+post-Raw batch chain every minute through EventBridge Scheduler and Step
+Functions, while keeping the schedule disabled until controlled AWS runtime
+validation is available.
 
 Status: completed as static/local implementation and documentation. AWS runtime
-validation was not executed because AWS credentials and GitHub CLI access are
-missing in the local environment.
+validation was not executed because this phase stayed static/local and the repo
+still lacks proven AWS/GitHub runtime execution.
 
 ## Changes Completed
 
-- Hardened `.github/workflows/aws-deploy.yml`:
-  - workflow-level permissions are `contents: read` only;
-  - OIDC `id-token: write` is scoped to AWS deployment jobs;
-  - deployment jobs use GitHub Environment `dev`;
-  - AWS credential steps include allowed account guard, masked account id,
-    explicit role session name and unset-current-credentials;
-  - third-party actions are pinned to full commit SHAs:
-    - `actions/checkout@v6.0.1` ->
-      `8e8c483db84b4bee98b60c0593521ed34d9990e8`;
-    - `actions/setup-python@v6.1.0` ->
-      `83679a892e2d95755f2dac6acb0bfd1e9ac5d548`;
-    - `aws-actions/configure-aws-credentials@v6.1.0` ->
-      `ec61189d14ec14c8efccab744f656cffd0e33f37`;
-    - `hashicorp/setup-terraform@v3` ->
-      `b9cd54a3c349d3f38e8881555d616ced269862dd`;
-  - Terraform backend config now uses S3 lockfiles with
-    `use_lockfile=true`;
-  - `TF_STATE_LOCK_TABLE` is no longer part of the normal GitHub Environment
-    variable contract;
-  - a `runtime-validation` job runs after Terraform apply on non-PR runs.
-- Raised AWS Terraform stack constraints to `required_version >= 1.14.0` and
-  the CI Terraform version to `1.15.7`.
-- Added `infra/scripts/aws-runtime-validate.py`:
-  - reads Terraform outputs for `core`, `batch` and `serving`;
-  - verifies immutable ECR/S3 artifacts;
-  - runs the controlled ECS/Kinesis/Glue/S3/Athena/DynamoDB/API/observability
-    runtime checks when AWS is available;
-  - writes `build/aws-runtime-evidence.json`;
-  - always attempts to scale ECS desired count back to `0` and stop Raw Glue
-    Streaming.
-- Added `infra/aws/README.md` explaining:
-  - one-time GitHub/AWS bootstrap;
-  - OIDC trust policy for
-    `repo:JulienDira/big_data_platform:environment:dev`;
-  - required GitHub Environment variables;
-  - S3 backend lockfile requirements;
-  - push-to-main flow;
-  - runtime proof checks;
-  - cleanup and cost control.
-- Updated focused tests:
-  - workflow guardrails and SHA pinning;
-  - deployment README contract;
-  - runtime validation script dry-run, evidence and cleanup behavior.
-- Updated deployment decision docs:
-  - `docs/aws-cicd-deployment-cadrage.md`;
+- Added `infra/aws/orchestration`:
+  - Step Functions Standard state machine for Bronze -> Silver -> Gold ->
+    latest projection;
+  - EventBridge Scheduler trigger with default expression `rate(1 minute)`;
+  - schedule disabled by default through `batch_pipeline_schedule_enabled`;
+  - DynamoDB `batch-pipeline` single-flight lock with conditional `PutItem`
+    and TTL;
+  - IAM roles for Step Functions and Scheduler;
+  - CloudWatch log group and stack outputs.
+- Extended `infra/aws/batch` outputs with scalar Bronze, Silver and Gold Glue
+  job names for downstream Terraform wiring.
+- Extended `infra/aws/serving` outputs with `latest_projection_lambda_arn`.
+- Updated `.github/workflows/aws-deploy.yml`:
+  - PR/static validation now includes `infra/aws/orchestration`;
+  - non-PR Terraform apply now applies `orchestration` after `batch` and
+    `serving`;
+  - the orchestration stack receives Glue job names and the projection Lambda
+    ARN from Terraform outputs;
+  - `batch_pipeline_schedule_enabled=false` is passed by default.
+- Added static tests for orchestration structure, schedule defaults, DynamoDB
+  lock behavior, outputs and workflow integration.
+- Updated docs:
+  - `cadrage.md`;
   - `docs/aws-service-iam-decisions.md`;
-  - `infra/aws/core/README.md`.
+  - `infra/aws/README.md`;
+  - `infra/aws/orchestration/README.md`.
 
-No RDS/PostgreSQL AWS target, new AWS service family, direct Streamlit AWS SDK
-access or broad data pipeline refactor was introduced.
+No RDS/PostgreSQL AWS target, new historical datastore, direct Streamlit AWS
+SDK access or broad data pipeline refactor was introduced.
 
 ## Validation Completed
 
 Repository state and source control:
 
-- `git status --short --untracked-files=all` was checked before changes. The
-  tree already contained Phase 9 modified/untracked files:
-  `apps/binance-producer/aws.py`, `cadrage.md`,
-  `docs/aws-phase-prompts.md`, `docs/aws-service-iam-decisions.md`,
-  `docs/phase-handoff.md`, `tests/test_producer_aws.py` and
-  `docs/aws-implementation-step-audit.md`. They were preserved.
-- Action tag SHAs were resolved with approved network access through
-  `git ls-remote`.
+- `git status --short --untracked-files=all` was checked before changes.
 
 Static/local validation:
 
+- Host `python` failed because the WindowsApps Python launcher could not create
+  the process. `py` was not installed. The repo Docker test path was used
+  instead.
 - First `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test` failed
   on Docker access:
   `C:\Users\julie\.docker\config.json: Access is denied` and Docker pipe
   access denied.
-- The same command was rerun with approved Docker access. The first rerun
-  exposed a Python 3.8 importlib/dataclass issue in the new test harness.
-- After fixing the test import, `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test`
-  passed: 51 tests OK, 1 skipped because the local Spark classpath lacks the
+- After approved Docker access,
+  `powershell -ExecutionPolicy Bypass -File .\platform.ps1 test` passed:
+  56 tests OK, 1 skipped because the local Spark classpath lacks the
   `spark-avro` package.
 - `terraform fmt -check -recursive infra/aws` passed.
-- Initial Terraform provider initialization for `core`, `batch` and `serving`
+- Initial Terraform provider initialization for `infra/aws/orchestration`
   failed because sandboxed network access to `registry.terraform.io` was
   blocked.
-- After approved provider-initialization network access:
-  - `terraform -chdir=infra/aws/core init -backend=false -input=false`
-    succeeded with `hashicorp/aws v5.100.0`;
-  - `terraform -chdir=infra/aws/batch init -backend=false -input=false`
-    succeeded with `hashicorp/aws v5.100.0` and `hashicorp/archive v2.8.0`;
-  - `terraform -chdir=infra/aws/serving init -backend=false -input=false`
-    succeeded with `hashicorp/aws v5.100.0` and `hashicorp/archive v2.8.0`.
+- After approved provider-initialization network access,
+  `terraform -chdir=infra/aws/orchestration init -backend=false -input=false`
+  succeeded with `hashicorp/aws v5.100.0`.
 - `terraform -chdir=infra/aws/core validate` passed.
 - `terraform -chdir=infra/aws/batch validate` passed.
 - `terraform -chdir=infra/aws/serving validate` passed.
-- `rg -n "aws_db|aws_rds|postgres|postgresql" infra/aws -g "*.tf"`
-  returned no match.
-- `rg -n "AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|aws-access-key-id|aws-secret-access-key|secrets\." .github\workflows\aws-deploy.yml`
-  returned no match.
-- `rg -n "TF_STATE_LOCK_TABLE|dynamodb_table" .github\workflows\aws-deploy.yml infra/aws\README.md docs\aws-cicd-deployment-cadrage.md`
-  returned no match.
+- `terraform -chdir=infra/aws/orchestration validate` passed.
 - `git diff --check` passed with LF/CRLF normalization warnings on Windows.
 
 Runtime and deployment availability checks:
 
-- `aws sts get-caller-identity` failed with:
-  `Unable to locate credentials. You can configure credentials by running "aws login".`
-- `gh auth status` failed because `gh` is not installed or not on PATH.
+- No AWS runtime checks, Terraform apply, Step Functions execution,
+  EventBridge schedule activation, Glue run or Lambda invocation were executed
+  in this phase.
 
 ## Proof Obtained
 
-- The repository now contains a hardened push-to-main AWS deployment path using
-  job-scoped GitHub OIDC, scoped-role inputs, account guardrails, immutable
-  ECR/S3 artifacts and S3 backend lockfiles.
-- The workflow includes a controlled non-PR runtime-validation job.
-- The runtime validation script is implemented and unit-tested for dry-run
-  evidence output and cleanup behavior.
+- The repository now contains a Terraform-managed orchestration stack for the
+  scheduled AWS batch chain after Raw.
+- The state machine statically encodes the intended order:
+  Bronze -> Silver -> Gold -> latest projection.
+- The EventBridge Scheduler expression is `rate(1 minute)`, but the schedule
+  is disabled by default.
+- The state machine uses a DynamoDB conditional lock so a one-minute trigger
+  can exit cleanly when a previous run still owns the lock.
+- GitHub Actions deployment wiring now applies the orchestration stack after
+  `batch` and `serving` and keeps the schedule disabled by default.
 - Local unit/static tests and Terraform validation pass.
-- Static scans show no AWS RDS/PostgreSQL target, no long-lived AWS key path in
-  the workflow and no legacy Terraform lock-table contract in the normal docs
-  or workflow.
 
 ## Not Yet Proven
 
@@ -217,45 +186,58 @@ Runtime and deployment availability checks:
 - Streamlit Cloud deployment and authentication flow.
 - CloudWatch alarms, SNS notifications and AWS Budget visibility.
 - `build/aws-runtime-evidence.json` from a real AWS runtime-validation run.
+- EventBridge Scheduler actually triggering the Step Functions state machine.
+- Step Functions executing Bronze, Silver, Gold and latest projection in AWS.
+- The DynamoDB lock preventing overlapping real one-minute executions.
+- Safe enabling of `batch_pipeline_schedule_enabled=true` in a bounded POC
+  runtime window.
 
 ## Next Recommended Phase
 
 Perform the one-time GitHub/AWS bootstrap described in `infra/aws/README.md`,
 then run the GitHub Actions workflow through a push to `main` or
-`workflow_dispatch`.
+`workflow_dispatch` with the orchestration schedule still disabled.
 
-If bootstrap is complete and the workflow succeeds, record the
-`build/aws-runtime-evidence.json` contents and recommend a narrow
-stabilization/demo-hardening phase.
+If bootstrap is complete and the workflow succeeds, record the Terraform
+outputs for `core`, `batch`, `serving` and `orchestration`, then run a
+controlled AWS runtime-validation pass. Enable
+`batch_pipeline_schedule_enabled=true` only in a bounded validation/demo window
+after the first manual orchestration run proves Bronze -> Silver -> Gold ->
+latest projection.
 
 If the workflow or runtime validation fails, recommend one targeted remediation
 phase named after the failing surface, for example OIDC trust, Terraform state,
 ECR artifact publication, ECS/Kinesis, Glue Raw, Glue Bronze/Silver, Glue Gold,
-Athena, DynamoDB projection or API Gateway/Cognito.
+Athena, Step Functions/Scheduler, DynamoDB projection or API Gateway/Cognito.
 
 Ready-to-use next-agent prompt:
 
 ```text
 Mission:
-Run the deployed Phase 10 GitHub Actions path in a real AWS/GitHub environment
-after completing the bootstrap in infra/aws/README.md.
+Run the deployed GitHub Actions path in a real AWS/GitHub environment after
+completing the bootstrap in infra/aws/README.md, then validate the scheduled
+batch orchestration in a controlled window.
 
 Before doing anything, read AGENTS.md, cadrage.md, docs/phase-handoff.md,
-infra/aws/README.md and .github/workflows/aws-deploy.yml. Confirm GitHub
-Environment dev has AWS_ACCOUNT_ID, AWS_DEPLOY_ROLE_ARN, AWS_REGION,
-AWS_ARTIFACT_BUCKET, TF_STATE_BUCKET, TF_STATE_REGION, VPC_ID,
-FARGATE_SUBNET_IDS, STREAMLIT_CALLBACK_URLS, STREAMLIT_LOGOUT_URLS and
-API_CORS_ALLOWED_ORIGINS. Confirm the AWS OIDC provider, deploy role trust,
-state bucket and S3 lockfile permissions exist.
+infra/aws/README.md, infra/aws/orchestration/README.md and
+.github/workflows/aws-deploy.yml. Confirm GitHub Environment dev has
+AWS_ACCOUNT_ID, AWS_DEPLOY_ROLE_ARN, AWS_REGION, AWS_ARTIFACT_BUCKET,
+TF_STATE_BUCKET, TF_STATE_REGION, VPC_ID, FARGATE_SUBNET_IDS,
+STREAMLIT_CALLBACK_URLS, STREAMLIT_LOGOUT_URLS and API_CORS_ALLOWED_ORIGINS.
+Confirm the AWS OIDC provider, deploy role trust, state bucket and S3 lockfile
+permissions exist.
 
-Run the workflow from GitHub, not with local long-lived AWS keys. Capture exact
+Run the workflow from GitHub, not with local long-lived AWS keys. Keep
+batch_pipeline_schedule_enabled=false for the normal deployment. Capture exact
 evidence from the GitHub run, Terraform outputs and build/aws-runtime-evidence.json.
-Do not claim AWS runtime proof if any bootstrap, permission or service check is
-missing.
+For the orchestration proof, first start the Step Functions state machine in a
+controlled manual run and verify Bronze -> Silver -> Gold -> latest projection.
+Only then enable the one-minute schedule in a bounded POC window. Do not claim
+AWS runtime proof if any bootstrap, permission or service check is missing.
 ```
 
 ## Suggested Commit Message
 
 ```text
-ci: harden AWS deployment runtime validation
+feat: add scheduled AWS batch orchestration
 ```

@@ -35,6 +35,12 @@ Official references used for this setup:
   https://developer.hashicorp.com/terraform/language/backend/s3
 - Amazon ECR image tag immutability:
   https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-tag-mutability.html
+- EventBridge Scheduler schedule types:
+  https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html
+- Step Functions optimized Glue integration:
+  https://docs.aws.amazon.com/step-functions/latest/dg/connect-glue.html
+- Step Functions DynamoDB integration:
+  https://docs.aws.amazon.com/step-functions/latest/dg/connect-ddb.html
 
 ## One-time bootstrap
 
@@ -130,10 +136,32 @@ Pushes to `main` and manual `workflow_dispatch` run:
    - uses Terraform S3 backend lockfiles with `use_lockfile=true`;
    - applies `infra/aws/batch`;
    - applies `infra/aws/serving`;
-   - keeps the projection schedule disabled by default.
+   - applies `infra/aws/orchestration`;
+   - keeps the direct projection schedule and batch pipeline schedule disabled
+     by default.
 4. `runtime-validation`
    - runs `infra/scripts/aws-runtime-validate.py`;
    - writes `build/aws-runtime-evidence.json`.
+
+## Scheduled batch orchestration
+
+`infra/aws/orchestration` prepares the regular batch chain after Raw:
+
+```text
+EventBridge Scheduler rate(1 minute)
+-> Step Functions
+-> Glue Bronze batch
+-> Glue Silver batch
+-> Glue Gold/trading_gold batch
+-> latest projection Lambda
+-> DynamoDB latest metrics
+```
+
+The Step Functions workflow uses a DynamoDB conditional lock so a one-minute
+trigger does not overlap a previous batch run. The schedule is deployed with
+`batch_pipeline_schedule_enabled=false` by default. Enable it only after the
+AWS bootstrap, deployment and controlled runtime validation prove the pipeline
+can run safely.
 
 ## Runtime proof checks
 
@@ -146,6 +174,8 @@ The runtime validation script checks:
   scale back to zero.
 - Raw, Bronze, Silver, Gold and `trading_gold` S3 prefixes contain objects.
 - Bronze, Silver and Gold Glue jobs finish with `SUCCEEDED`.
+- Step Functions runs Bronze, Silver, Gold and latest projection in order.
+- EventBridge Scheduler can trigger the state machine when explicitly enabled.
 - Athena count queries on `trading_gold.market_indicators` and
   `trading_gold.market_indicators_latest` return rows.
 - Latest projection Lambda writes DynamoDB items.
@@ -169,6 +199,7 @@ For manual cleanup, destroy in reverse dependency order only after confirming
 that no runtime validation is in progress:
 
 ```powershell
+terraform -chdir=infra/aws/orchestration destroy
 terraform -chdir=infra/aws/serving destroy
 terraform -chdir=infra/aws/batch destroy
 terraform -chdir=infra/aws/core destroy
@@ -178,6 +209,8 @@ Cost controls:
 
 - keep the ECS desired count at `0` outside the bounded validation window;
 - keep Glue worker count low for POC validation;
+- keep `batch_pipeline_schedule_enabled=false` unless a later controlled AWS
+  runtime phase explicitly enables the one-minute batch chain;
 - keep `projection_schedule_enabled=false` unless a later phase explicitly
   enables it;
 - configure `ALERT_EMAIL` so the 50 EUR AWS Budget can notify at configured

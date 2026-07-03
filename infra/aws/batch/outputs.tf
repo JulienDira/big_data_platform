@@ -53,6 +53,21 @@ output "glue_job_name" {
   value       = aws_glue_job.gold_indicators_batch.name
 }
 
+output "bronze_glue_job_name" {
+  description = "Glue Spark batch job name for Raw S3 to Bronze S3."
+  value       = aws_glue_job.bronze_market_candles_batch.name
+}
+
+output "silver_glue_job_name" {
+  description = "Glue Spark batch job name for Bronze S3 to Silver S3."
+  value       = aws_glue_job.silver_market_candles_batch.name
+}
+
+output "gold_glue_job_name" {
+  description = "Glue Spark batch job name for Silver S3 to Gold and trading_gold S3."
+  value       = aws_glue_job.gold_indicators_batch.name
+}
+
 output "lake_ingestion_glue_job_names" {
   description = "Glue job names for Raw, Bronze and Silver lake ingestion."
   value = {
