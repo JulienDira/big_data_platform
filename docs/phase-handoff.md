@@ -127,8 +127,8 @@ workflow still needs to be rerun to prove ECR teardown in GitHub Actions.
   initializes the `infra/aws/core` S3 backend before reading core Terraform
   outputs in the `terraform-apply` job.
 - Fixed `.github/workflows/aws-destroy.yml` so the `core` teardown passes
-  `ecr_force_delete=true` and can delete the producer ECR repository even when
-  images remain.
+  `ecr_force_delete=true` and explicitly deletes producer ECR images before
+  removing the repository.
 - Updated `infra/aws/README.md` to document the same ECR force-delete behavior
   for manual cleanup.
 
@@ -182,8 +182,9 @@ Runtime and deployment availability checks:
 - Local unit/static tests and Terraform validation pass.
 - The deployment output step no longer relies on `.terraform` state from the
   previous GitHub Actions job before reading `infra/aws/core` outputs.
-- The destroy workflow now asks Terraform to force-delete the producer ECR
-  repository during `core` teardown instead of failing on remaining images.
+- The destroy workflow now empties the producer ECR repository and asks
+  Terraform to force-delete it during `core` teardown instead of failing on
+  remaining images.
 
 ## Not Yet Proven
 
