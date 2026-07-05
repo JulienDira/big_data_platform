@@ -206,9 +206,9 @@ terraform -chdir=infra/aws/batch destroy
 terraform -chdir=infra/aws/core destroy -var="ecr_force_delete=true"
 ```
 
-The GitHub Actions destroy workflow passes `ecr_force_delete=true` only during
-the `core` teardown so the producer ECR repository can be deleted even when it
-still contains immutable image tags from previous deployments.
+The GitHub Actions destroy workflow empties the producer ECR repository before
+the `core` teardown, then passes `ecr_force_delete=true` so the repository can
+be deleted even when previous deployments published immutable image tags.
 
 Cost controls:
 
