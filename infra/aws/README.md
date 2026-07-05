@@ -203,8 +203,12 @@ that no runtime validation is in progress:
 terraform -chdir=infra/aws/orchestration destroy
 terraform -chdir=infra/aws/serving destroy
 terraform -chdir=infra/aws/batch destroy
-terraform -chdir=infra/aws/core destroy
+terraform -chdir=infra/aws/core destroy -var="ecr_force_delete=true"
 ```
+
+The GitHub Actions destroy workflow passes `ecr_force_delete=true` only during
+the `core` teardown so the producer ECR repository can be deleted even when it
+still contains immutable image tags from previous deployments.
 
 Cost controls:
 
