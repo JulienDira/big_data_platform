@@ -79,6 +79,11 @@ Status: completed as static/local implementation and documentation. AWS runtime
 validation was not executed because this phase did not run real Glue, Kinesis,
 S3, Step Functions or EventBridge resources.
 
+Latest remediation: GitHub Actions deployment output initialization fix.
+
+Status: completed as a static CI workflow correction. The GitHub deployment
+workflow still needs to be rerun to prove the fix in GitHub Actions.
+
 ## Changes Completed
 
 - Refactored `jobs/bronze-ingestion/aws.py`:
@@ -113,6 +118,9 @@ S3, Step Functions or EventBridge resources.
   `docs/aws-service-iam-decisions.md`, `docs/aws-lake-ingestion-cadrage.md`,
   `docs/aws-implementation-step-audit.md`, `infra/aws/README.md`,
   `infra/aws/batch/README.md`, `infra/aws/orchestration/README.md`.
+- Fixed `.github/workflows/aws-deploy.yml` so the final deployment output step
+  initializes the `infra/aws/core` S3 backend before reading core Terraform
+  outputs in the `terraform-apply` job.
 
 No on-premise entry point, RDS/PostgreSQL AWS target, DynamoDB/API/dashboard
 logic, Gold calculation or `trading_gold` contract was changed.
@@ -148,6 +156,8 @@ Runtime and deployment availability checks:
 - No AWS runtime checks, Terraform apply, Step Functions execution,
   EventBridge schedule activation, Glue run, ECS run, Kinesis write, S3 object
   check, Athena query or Lambda invocation were executed in this phase.
+- The CI workflow fix was reviewed statically only. The GitHub Actions run was
+  not rerun locally from this workspace.
 
 ## Proof Obtained
 
@@ -158,6 +168,8 @@ Runtime and deployment availability checks:
   synchronous batch step.
 - The planned batch chain is now Silver -> Gold -> latest projection.
 - Local unit/static tests and Terraform validation pass.
+- The deployment output step no longer relies on `.terraform` state from the
+  previous GitHub Actions job before reading `infra/aws/core` outputs.
 
 ## Not Yet Proven
 
