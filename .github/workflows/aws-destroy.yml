@@ -160,5 +160,6 @@ jobs:
             -backend-config="use_lockfile=true"
           terraform -chdir=infra/aws/core destroy -auto-approve -input=false \
             -var="aws_region=${AWS_REGION}" \
+            -var="ecr_force_delete=true" \
             -var="vpc_id=${VPC_ID}" \
             -var="fargate_subnet_ids=${FARGATE_SUBNET_IDS}"

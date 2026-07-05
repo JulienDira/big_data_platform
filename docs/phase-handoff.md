@@ -84,6 +84,11 @@ Latest remediation: GitHub Actions deployment output initialization fix.
 Status: completed as a static CI workflow correction. The GitHub deployment
 workflow still needs to be rerun to prove the fix in GitHub Actions.
 
+Latest remediation: GitHub Actions ECR destroy fix.
+
+Status: completed as a static CI workflow correction. The GitHub destroy
+workflow still needs to be rerun to prove ECR teardown in GitHub Actions.
+
 ## Changes Completed
 
 - Refactored `jobs/bronze-ingestion/aws.py`:
@@ -121,6 +126,11 @@ workflow still needs to be rerun to prove the fix in GitHub Actions.
 - Fixed `.github/workflows/aws-deploy.yml` so the final deployment output step
   initializes the `infra/aws/core` S3 backend before reading core Terraform
   outputs in the `terraform-apply` job.
+- Fixed `.github/workflows/aws-destroy.yml` so the `core` teardown passes
+  `ecr_force_delete=true` and can delete the producer ECR repository even when
+  images remain.
+- Updated `infra/aws/README.md` to document the same ECR force-delete behavior
+  for manual cleanup.
 
 No on-premise entry point, RDS/PostgreSQL AWS target, DynamoDB/API/dashboard
 logic, Gold calculation or `trading_gold` contract was changed.
@@ -158,6 +168,8 @@ Runtime and deployment availability checks:
   check, Athena query or Lambda invocation were executed in this phase.
 - The CI workflow fix was reviewed statically only. The GitHub Actions run was
   not rerun locally from this workspace.
+- The ECR destroy fix was reviewed statically only. The GitHub Actions destroy
+  workflow was not rerun locally from this workspace.
 
 ## Proof Obtained
 
@@ -170,6 +182,8 @@ Runtime and deployment availability checks:
 - Local unit/static tests and Terraform validation pass.
 - The deployment output step no longer relies on `.terraform` state from the
   previous GitHub Actions job before reading `infra/aws/core` outputs.
+- The destroy workflow now asks Terraform to force-delete the producer ECR
+  repository during `core` teardown instead of failing on remaining images.
 
 ## Not Yet Proven
 
