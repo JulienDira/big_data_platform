@@ -327,6 +327,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          terraform -chdir=infra/aws/core init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_PREFIX}/core.tfstate" \
+            -backend-config="region=${TF_STATE_REGION}" \
+            -backend-config="use_lockfile=true"
+
           terraform -chdir=infra/aws/core output
           terraform -chdir=infra/aws/batch output
           terraform -chdir=infra/aws/serving output
