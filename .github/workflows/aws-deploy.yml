@@ -338,8 +338,8 @@ jobs:
           terraform -chdir=infra/aws/serving output
           terraform -chdir=infra/aws/orchestration output
 
-  runtime-validation:
-    name: Runtime Validation
+  deployment-summary:
+    name: AWS Deployment Summary
     runs-on: ubuntu-latest
     needs: terraform-apply
     if: github.event_name != 'pull_request'
@@ -387,5 +387,5 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run controlled AWS runtime validation
+      - name: Write AWS deployment summary
         run: python infra/scripts/aws-runtime-validate.py
