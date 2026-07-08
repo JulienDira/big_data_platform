@@ -1,55 +1,35 @@
-# Cadrage Silver
+# Silver
 
-Date: 2026-06-17
-
-Objectif: fixer le role de Silver avant de faire evoluer Gold et le datamart.
+Silver est la table Hive/HDFS des bougies propres. Elle lit Bronze et produit
+un jeu de donnees stable pour les calculs analytiques.
 
 ## Role
 
-Silver est la couche Hive/HDFS des candles propres:
+- garder uniquement les candles fermees;
+- appliquer les controles OHLCV minimaux;
+- dedoublonner par `(symbol, interval, open_time)`;
+- conserver la version la plus recente via `ingested_at`;
+- departager les doublons restants avec `event_id`;
+- partitionner par `event_date`, `symbol`, `interval`.
 
-- donnees decodees depuis Bronze;
-- candles fermees uniquement;
-- colonnes stables et explicites;
-- controles qualite OHLCV minimaux;
-- dedoublonnage par `(symbol, interval, open_time)`;
-- conservation de la version la plus recente via `ingested_at`;
-- tie-break deterministe par `event_id`;
-- partitionnement par `event_date`, `symbol`, `interval`.
-
-Silver ne calcule pas les indicateurs EMA, MACD, RSI ou Bollinger. Ces
-indicateurs sont des objets analytiques et appartiennent a une couche Gold lake
-ou a une couche metier ulterieure.
+Silver ne calcule pas EMA, MACD, RSI ou Bollinger. Ces indicateurs sont dans
+Gold.
 
 ## Sortie
-
-Table cible:
 
 ```text
 silver.market_candles
 ```
 
-Colonnes conservees:
+Colonnes principales:
 
-- identite et provenance: `event_id`, `source`;
-- cle marche: `symbol`, `interval`, `open_time`, `close_time`;
-- OHLCV: `open`, `high`, `low`, `close`, `volume`,
-  `quote_asset_volume`, `number_of_trades`,
+- provenance: `event_id`, `source`, `ingested_at`;
+- marche: `symbol`, `interval`, `open_time`, `close_time`;
+- OHLCV: `open`, `high`, `low`, `close`, `volume`;
+- volumes complementaires: `quote_asset_volume`, `number_of_trades`,
   `taker_buy_base_asset_volume`, `taker_buy_quote_asset_volume`;
 - controle: `is_closed`;
-- audit: `ingested_at`;
-- partition metier: `event_date`.
+- partition: `event_date`.
 
-## Evolution attendue
-
-La prochaine etape doit separer:
-
-```text
-Silver clean candles
-  -> Gold lake indicators / aggregates
-  -> PostgreSQL datamart or serving tables
-```
-
-PostgreSQL ne doit plus etre considere comme la couche Gold principale lorsque
-la couche Gold lake est introduite. Il devient une projection optimisee pour la
-consultation metier.
+Le job `jobs/silver-transformation` reconstruit la table de facon
+deterministe.

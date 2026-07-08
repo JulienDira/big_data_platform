@@ -1,30 +1,19 @@
-# Cadrage Raw vers Bronze
+# Raw vers Bronze
 
-Date: 2026-06-17
-
-Objectif: cadrer le fonctionnement Spark Structured Streaming entre la couche
-Raw et la couche Bronze avant d'etendre les changements a Silver puis Gold.
-
-## Positionnement
-
-Le flux cible Raw -> Bronze est un streaming en deux etages avec Raw comme zone
-persistante intermediaire:
+Raw et Bronze sont deux jobs Spark Structured Streaming distincts, executes sur
+YARN.
 
 ```text
 Kafka
-  -> Spark Structured Streaming raw-consumer sur YARN
+  -> raw-consumer
   -> HDFS Raw Parquet
-  -> Spark Structured Streaming bronze-ingestion sur YARN
+  -> bronze-ingestion
   -> HDFS Bronze Parquet
 ```
 
-Bronze ne lit pas directement Kafka dans la cible courante. Il lit Raw depuis
-HDFS afin de permettre le rejeu, l'audit et la reconstruction de Bronze sans
-dependre de la retention Kafka.
+## Raw
 
-## Contrat Raw
-
-Raw conserve l'envelope Kafka et les metadonnees techniques:
+Raw stocke l'enveloppe Kafka telle qu'elle arrive:
 
 - `topic`, `partition`, `offset`;
 - `key`, `value`;
@@ -33,50 +22,34 @@ Raw conserve l'envelope Kafka et les metadonnees techniques:
 - `ingested_at`;
 - partitions `symbol`, `interval`, `ingestion_date`, `ingestion_hour`.
 
-Le champ `value` reste le payload Avro Confluent original. Bronze est
-responsable du decodage applicatif.
+Le champ `value` reste le payload Avro Confluent. Raw sert de zone de reprise:
+Bronze relit HDFS au lieu de relire directement Kafka.
 
-## Semantique Bronze
+## Bronze
 
-Bronze est la premiere couche metier decodee:
+Bronze produit les premieres donnees metier decodees:
 
 - lecture streaming de Raw en Parquet;
-- decodage Avro selon `contracts/market-candle/v1.avsc`;
-- rejet technique des payloads non decodables vers `KAFKA_ERROR_TOPIC`;
-- typage selon le contrat Avro;
+- decodage avec `contracts/market-candle/v1.avsc`;
+- rejet des payloads non decodables vers `KAFKA_ERROR_TOPIC`;
+- typage des colonnes selon le contrat Avro;
 - ajout de `event_date`, `year`, `month`, `day`;
-- watermark configure par `BRONZE_WATERMARK_DELAY`;
-- dedoublonnage minimal par `event_id`;
-- ecriture Parquet append-only dans `BRONZE_PATH`;
+- watermark via `BRONZE_WATERMARK_DELAY`;
+- dedoublonnage par `event_id`;
+- ecriture Parquet dans `BRONZE_PATH`;
 - partitionnement par `event_date`, `symbol`, `interval`.
 
-Bronze ne porte pas les regles analytiques Silver. Les controles metier plus
-forts, la selection de la derniere bougie par cle et les aggregations restent
-hors de cette couche.
+Bronze ne calcule pas d'indicateurs et ne choisit pas la derniere bougie par
+cle marche. Ces regles appartiennent a Silver et Gold.
 
-## Micro-batch
-
-Le job Bronze utilise un trigger explicite configure par:
+## Parametres utiles
 
 ```text
 BRONZE_TRIGGER_INTERVAL=30 seconds
+BRONZE_WATERMARK_DELAY=2 days
+BRONZE_CHECKPOINT_PATH
+BRONZE_PATH
+KAFKA_ERROR_TOPIC
 ```
 
-Ce choix rend le comportement lisible pour le POC local: Spark reste en
-Structured Streaming, mais les traitements sont cadences par micro-batchs
-observables et parametrables.
-
-## Rejeu et idempotence
-
-Le checkpoint Bronze est stocke dans `BRONZE_CHECKPOINT_PATH`. Pour rejouer
-Bronze depuis Raw, il faut repartir d'un checkpoint Bronze vide ou dedie. Le
-resultat logique attendu doit rester stable pour un meme contenu Raw, sous
-reserve des regles de watermark et de dedoublonnage.
-
-## Limites POC
-
-- Les erreurs de decodage partent dans Kafka, pas encore dans une zone HDFS
-  `rejected`.
-- La reprise et le rejeu restent a valider runtime.
-- Le delai de watermark est une valeur locale POC a ajuster si les donnees
-  arrivent en retard au-dela de la fenetre retenue.
+Pour rejouer Bronze depuis Raw, utiliser un checkpoint Bronze vide ou dedie.

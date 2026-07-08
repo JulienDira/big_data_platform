@@ -1,9 +1,11 @@
-# Data contracts
+# Contrats de donnees
 
-`market-candle/v1.avsc` is the only canonical candle contract. Producers and
-consumers load this file at runtime; they must not maintain private copies.
+`market-candle/v1.avsc` est le contrat Avro canonique des bougies de marche.
+Les producteurs et consommateurs le chargent au runtime.
 
-Schema Registry compatibility is set to `BACKWARD`. Additive changes require
-nullable fields or defaults. Breaking changes require a new subject/topic
-version rather than an in-place edit.
+Regles:
 
+- ne pas maintenir de copie privee du schema;
+- garder la compatibilite Schema Registry en `BACKWARD`;
+- ajouter un champ avec une valeur par defaut ou un type nullable;
+- creer une nouvelle version de sujet/topic pour une rupture de contrat.

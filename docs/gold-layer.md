@@ -1,59 +1,41 @@
-# Cadrage Gold lake
+# Gold et Serving
 
-Date: 2026-06-17
+Gold contient les indicateurs analytiques calcules depuis Silver. Serving publie
+des tables PostgreSQL plus pratiques a consulter.
 
-Objectif: materialiser les indicateurs analytiques dans le lake avant toute
-projection datamart.
+## Gold
 
-## Role
+Le job `jobs/gold-indicators` lit:
 
-Gold lake est la couche Hive/HDFS des objets analytiques calcules depuis Silver:
+```text
+silver.market_candles
+```
 
-- lecture de `silver.market_candles`;
-- calcul par groupe `(symbol, interval)`;
-- conservation des colonnes OHLCV utiles;
-- calcul EMA 12/26, MACD, RSI 14 et bandes de Bollinger;
-- ajout de `event_date`;
-- ecriture Parquet dans Hive;
-- partitionnement par `event_date`, `symbol`, `interval`;
-- rebuild complet deterministe.
-
-Gold lake ne charge pas PostgreSQL directement. PostgreSQL est charge par le job
-Serving dedie afin de separer calcul analytique et publication metier.
-
-## Sortie
-
-Table cible:
+Il ecrit:
 
 ```text
 gold.market_indicators
 ```
 
-Variables:
+Indicateurs calcules par `(symbol, interval)`:
 
-```text
-GOLD_DATABASE=gold
-GOLD_TABLE=market_indicators
-```
+- EMA 12 et EMA 26;
+- MACD;
+- RSI 14;
+- bandes de Bollinger.
 
-## Datamart
+La sortie conserve les colonnes OHLCV utiles et partitionne par `event_date`,
+`symbol`, `interval`. Le rebuild est complet et deterministe.
 
-Les variables `DATAMART_*` de `config/defaults.env` pilotent le chargement vers
-PostgreSQL:
+## Serving
 
-```text
-DATAMART_JDBC_URL
-DATAMART_DB_USER
-DATAMART_DB_PASSWORD
-DATAMART_INDICATORS_TABLE
-DATAMART_LATEST_TABLE
-DATAMART_MULTITIMEFRAME_TABLE
-DATAMART_DAILY_SUMMARY_TABLE
-DATAMART_BASE_INTERVAL
-DATAMART_CONTEXT_INTERVALS
-```
+Le job `jobs/serving-datamart` lit `gold.market_indicators`, applique les SQL
+de `jobs/serving-datamart/sql` et reconstruit les tables PostgreSQL:
 
-Le job `jobs/serving-datamart` lit `gold.market_indicators`, applique une
-registry SQL et reconstruit les tables PostgreSQL `market_indicators`,
-`market_indicators_latest`, `market_multitimeframe_signals` et
-`market_daily_summary`.
+- `market_indicators`;
+- `market_indicators_latest`;
+- `market_multitimeframe_signals`;
+- `market_daily_summary`.
+
+Les noms de tables et la connexion JDBC sont pilotes par les variables
+`DATAMART_*` dans `config/defaults.env`.

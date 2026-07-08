@@ -1,13 +1,21 @@
-# Jobs
+# Jobs Spark
 
-- `raw-consumer`: long-running global Structured Streaming job for the market candles topic, checkpointed in HDFS.
-- `bronze-ingestion`: long-running Structured Streaming job from Raw to Bronze, checkpointed in HDFS.
-- `silver-transformation`: idempotent full rebuild of the canonical Hive table.
-- `gold-indicators`: idempotent full rebuild of the Hive Gold lake table.
-- `serving-datamart`: idempotent full rebuild of the PostgreSQL Serving tables from Gold.
-- `utils`: shared functions for environment loading, schemas, quality rules, deduplication, indicators, Hive writes and JDBC writes.
+Les jobs sont organises par etape du pipeline:
 
-All jobs run through `spark-submit --master yarn --deploy-mode cluster`. Runtime
-configuration is passed through environment variables by the submission scripts.
-Shared Python helpers are packaged into `/tmp/jobs-utils.zip` by the submit
-scripts and passed to Spark with `--py-files`.
+| Job | Role |
+|---|---|
+| `raw-consumer` | Lit Kafka et ecrit l'enveloppe Raw dans HDFS |
+| `bronze-ingestion` | Decode Raw, applique les controles techniques et ecrit Bronze |
+| `silver-transformation` | Reconstruit la table Hive des bougies propres |
+| `gold-indicators` | Calcule les indicateurs analytiques dans Hive |
+| `serving-datamart` | Reconstruit les tables PostgreSQL de consultation |
+| `utils` | Fonctions partagees: env, schemas, qualite, dedup, indicateurs, Hive, JDBC |
+
+Tous les jobs passent par:
+
+```text
+spark-submit --master yarn --deploy-mode cluster
+```
+
+Les scripts de `infra/scripts` chargent la configuration depuis l'environnement
+et creent l'archive `/tmp/jobs-utils.zip` pour `--py-files`.
